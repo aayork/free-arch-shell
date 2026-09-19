@@ -198,6 +198,26 @@ Item {
     Util.execDetached("omarchy-theme-bg-set " + Util.shellQuote(path))
   }
 
+  // Derives a palette from the current background and applies it as the
+  // generated "wallpaper" theme (see omarchy-theme-from-background). The script
+  // also re-homes the background under that theme, so once it exits reload the
+  // theme and background rows to match.
+  function matchThemeToBackground() {
+    if (!root.backgroundValue) return
+    matchThemeProc.command = ["bash", "-c", "omarchy-theme-from-background \"$1\"", "bash", root.backgroundValue]
+    matchThemeProc.running = true
+  }
+
+  Process {
+    id: matchThemeProc
+    onExited: function(code) {
+      themeCurrent.running = true
+      themeList.running = true
+      backgroundList.running = true
+      backgroundCurrent.running = true
+    }
+  }
+
   Timer {
     id: backgroundRefreshDelay
     interval: 1200
@@ -239,12 +259,36 @@ Item {
     }
   }
 
+  // A browsed file is copied into the theme's user backgrounds dir, which the
+  // list above already scans, so it stays selectable (and keeps working as the
+  // saved background) if the original is later moved or deleted. Files already
+  // inside a scanned dir are used in place. A name clash with different
+  // content gets a timestamp prefix instead of overwriting the earlier copy.
   function applyBackgroundFromFile(path) {
-    var label = path.substring(path.lastIndexOf("/") + 1)
-    var next = root.backgroundOptions.filter(function(o) { return o.value !== path })
-    next.unshift({ value: path, label: label })
-    root.backgroundOptions = next
-    root.applyBackground(path)
+    var script = "src=$(realpath -- \"$1\") || exit 1; "
+      + "theme=$(cat \"$HOME/.local/state/omarchy/current/theme.name\" 2>/dev/null); "
+      + "dir=\"$HOME/.config/omarchy/backgrounds/$theme\"; "
+      + "themedir=$(realpath -m \"$HOME/.local/state/omarchy/current/theme/backgrounds\"); "
+      + "case \"$src\" in \"$dir\"/*|\"$themedir\"/*) dest=$src ;; "
+      + "*) mkdir -p \"$dir\" || exit 1; dest=\"$dir/${src##*/}\"; "
+      + "if [ -e \"$dest\" ] && ! cmp -s \"$src\" \"$dest\"; then dest=\"$dir/$(date +%s)-${src##*/}\"; fi; "
+      + "[ -e \"$dest\" ] || cp -- \"$src\" \"$dest\" || exit 1 ;; esac; "
+      + "omarchy-theme-bg-set \"$dest\" && printf '%s\\n' \"$dest\""
+    backgroundImportProc.command = ["bash", "-c", script, "bash", path]
+    backgroundImportProc.running = true
+  }
+
+  Process {
+    id: backgroundImportProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var dest = String(text || "").trim()
+        if (dest) root.backgroundValue = dest
+        backgroundList.running = true
+        backgroundCurrent.running = true
+      }
+    }
   }
 
   function applyFont(name) {
@@ -561,6 +605,16 @@ Item {
               fontFamily: root.fontFamily
               enabled: !backgroundBrowseProc.running
               onClicked: root.browseForBackground()
+            }
+
+            Button {
+              text: matchThemeProc.running ? "Matching..." : "Match theme colors to background"
+              bordered: true
+              foreground: root.foreground
+              accent: Color.accent
+              fontFamily: root.fontFamily
+              enabled: !matchThemeProc.running && root.backgroundValue !== ""
+              onClicked: root.matchThemeToBackground()
             }
           }
 

@@ -1,0 +1,212 @@
+#!/bin/bash
+
+# omarchy:summary=Generate a theme from a background image's colors and apply it
+# omarchy:args=[--mode dark|light|auto] [--print] <path-to-image-or-video>
+# omarchy:examples=omarchy theme from-background ~/Pictures/background.png
+
+# Extracts a palette from the image, writes it as the user theme "wallpaper"
+# (~/.config/omarchy/themes/wallpaper/colors.toml), applies that theme, and
+# keeps the image as the current background. Running it again with another
+# image overwrites the same theme, so it never piles up one theme per image.
+
+THEME_NAME="wallpaper"
+MODE="auto"
+PRINT_ONLY=0
+
+while (( $# > 0 )); do
+  case "$1" in
+    --mode) MODE="${2:-auto}"; shift 2 ;;
+    --print) PRINT_ONLY=1; shift ;;
+    *) break ;;
+  esac
+done
+
+if [[ -z $1 || ! $MODE =~ ^(dark|light|auto)$ ]]; then
+  echo "Usage: omarchy-theme-from-background [--mode dark|light|auto] [--print] <path-to-image-or-video>" >&2
+  exit 1
+fi
+
+SOURCE="$(realpath -- "$1" 2>/dev/null)"
+if [[ ! -f $SOURCE ]]; then
+  echo "File does not exist: $1" >&2
+  exit 1
+fi
+
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+# Palette extraction reads pixels, so a video contributes its first frame.
+SAMPLE="$SOURCE"
+if [[ ${SOURCE,,} =~ \.(mp4|m4v|mov|webm|mkv|avi)$ ]]; then
+  SAMPLE="$WORK_DIR/frame.png"
+  if ! ffmpeg -v error -ss 1 -i "$SOURCE" -frames:v 1 "$SAMPLE" 2>/dev/null &&
+     ! ffmpeg -v error -i "$SOURCE" -frames:v 1 "$SAMPLE" 2>/dev/null; then
+    echo "Could not read a frame from $SOURCE" >&2
+    exit 1
+  fi
+fi
+
+COLORS_TOML=$(python3 - "$SAMPLE" "$MODE" <<'PY'
+import colorsys
+import sys
+
+from PIL import Image
+
+path, requested_mode = sys.argv[1], sys.argv[2]
+
+img = Image.open(path).convert("RGB")
+img.thumbnail((160, 160))
+
+# Median-cut the image down to a handful of representative colors, weighted by
+# how many pixels each covers.
+quant = img.quantize(colors=20, method=Image.Quantize.MEDIANCUT)
+palette = quant.getpalette()
+counts = sorted(quant.getcolors(), reverse=True)
+total = sum(c for c, _ in counts)
+
+swatches = []
+for count, idx in counts:
+    r, g, b = palette[idx * 3:idx * 3 + 3]
+    h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+    swatches.append({"share": count / total, "h": h, "l": l, "s": s})
+
+avg_lightness = sum(w["share"] * w["l"] for w in swatches)
+mode = requested_mode
+if mode == "auto":
+    # Dark is the default look; only go light for a clearly bright image.
+    mode = "light" if avg_lightness > 0.62 else "dark"
+dark = mode == "dark"
+
+
+def score(sw):
+    # Prefer a color that is both common and clearly chromatic, and stay away
+    # from near-black/near-white where hue is meaningless.
+    if sw["s"] < 0.2 or not 0.2 < sw["l"] < 0.85:
+        return 0
+    return sw["share"] ** 0.5 * sw["s"]
+
+
+best = max(swatches, key=score)
+if score(best) == 0:
+    # A grayscale image: fall back to the most saturated swatch there is.
+    best = max(swatches, key=lambda sw: sw["s"])
+    accent_h, accent_s = best["h"], max(best["s"], 0.15)
+else:
+    accent_h, accent_s = best["h"], best["s"]
+
+# Tint the surfaces with the image's overall hue, so the theme reads as one
+# family rather than a neutral gray with one colored button.
+tint_h = accent_h
+tint_s = min(max(accent_s, 0.12), 0.35)
+
+
+def hx(h, l, s):
+    r, g, b = colorsys.hls_to_rgb(h % 1.0, min(max(l, 0), 1), min(max(s, 0), 1))
+    return "#{:02x}{:02x}{:02x}".format(round(r * 255), round(g * 255), round(b * 255))
+
+
+def surface(l, s=None):
+    return hx(tint_h, l, tint_s if s is None else s)
+
+
+if dark:
+    surfaces = dict(
+        background=surface(0.10),
+        dark_background=surface(0.075),
+        darker_background=surface(0.05),
+        lighter_background=surface(0.15),
+        selection=surface(0.21),
+        muted=surface(0.32),
+        foreground=surface(0.80, 0.18),
+        dark_foreground=surface(0.55, 0.14),
+        light_foreground=surface(0.86, 0.2),
+        bright_foreground=surface(0.92, 0.25),
+    )
+    accent_l, ansi_l, bright_l = 0.66, 0.64, 0.72
+else:
+    surfaces = dict(
+        background=surface(0.95, 0.25),
+        dark_background=surface(0.91, 0.22),
+        darker_background=surface(0.87, 0.2),
+        lighter_background=surface(0.98, 0.3),
+        selection=surface(0.82, 0.25),
+        muted=surface(0.68, 0.15),
+        foreground=surface(0.22, 0.2),
+        dark_foreground=surface(0.45, 0.15),
+        light_foreground=surface(0.16, 0.2),
+        bright_foreground=surface(0.10, 0.22),
+    )
+    accent_l, ansi_l, bright_l = 0.36, 0.38, 0.30
+
+accent = hx(accent_h, accent_l, max(accent_s, 0.5))
+
+
+def ansi(hue_degrees, lightness, saturation=0.6):
+    return hx(hue_degrees / 360, lightness, saturation)
+
+
+colors = {
+    "mode": mode,
+    "accent": accent,
+    **surfaces,
+    "red": ansi(355, ansi_l),
+    "yellow": ansi(42, ansi_l),
+    "orange": ansi(22, ansi_l),
+    "green": ansi(110, ansi_l),
+    "cyan": ansi(185, ansi_l - 0.06, 0.55),
+    "blue": ansi(220, ansi_l),
+    "magenta": ansi(285, ansi_l),
+    "brown": ansi(18, 0.30 if dark else 0.34, 0.4),
+    "bright_red": ansi(355, bright_l, 0.75),
+    "bright_yellow": ansi(38, bright_l, 0.8),
+    "bright_green": ansi(105, bright_l, 0.7),
+    "bright_cyan": ansi(185, bright_l, 0.75),
+    "bright_blue": ansi(220, bright_l, 0.8),
+    "bright_magenta": ansi(285, bright_l, 0.7),
+}
+
+order = [
+    "mode", "accent", "selection", "muted", None,
+    "background", "dark_background", "darker_background", "lighter_background", None,
+    "foreground", "dark_foreground", "light_foreground", "bright_foreground", None,
+    "red", "yellow", "orange", "green", "cyan", "blue", "magenta", "brown", None,
+    "bright_red", "bright_yellow", "bright_green", "bright_cyan", "bright_blue",
+    "bright_magenta",
+]
+for key in order:
+    if key is None:
+        print()
+    elif key == "mode":
+        print('mode = "{}"'.format(mode))
+    else:
+        print('{:<18} = "{}"'.format(key, colors[key]))
+PY
+) || { echo "Could not extract colors from $SOURCE" >&2; exit 1; }
+
+if (( PRINT_ONLY )); then
+  printf '%s\n' "$COLORS_TOML"
+  exit 0
+fi
+
+THEME_DIR="$HOME/.config/omarchy/themes/$THEME_NAME"
+mkdir -p "$THEME_DIR"
+printf '%s\n' "$COLORS_TOML" >"$THEME_DIR/colors.toml.new" && mv "$THEME_DIR/colors.toml.new" "$THEME_DIR/colors.toml"
+
+# The theme's own backgrounds dir is what the switcher lists for it, so keep a
+# copy there: it stays selectable, and keeps working if the original moves. A
+# name clash with different content gets a timestamp prefix, not an overwrite.
+BACKGROUNDS_DIR="$HOME/.config/omarchy/backgrounds/$THEME_NAME"
+mkdir -p "$BACKGROUNDS_DIR"
+BACKGROUND="$SOURCE"
+if [[ ${SOURCE%/*} != "$BACKGROUNDS_DIR" ]]; then
+  BACKGROUND="$BACKGROUNDS_DIR/${SOURCE##*/}"
+  if [[ -e $BACKGROUND ]] && ! cmp -s "$SOURCE" "$BACKGROUND"; then
+    BACKGROUND="$BACKGROUNDS_DIR/$(date +%s)-${SOURCE##*/}"
+  fi
+  [[ -e $BACKGROUND ]] || cp -- "$SOURCE" "$BACKGROUND" || exit 1
+fi
+
+# Apply the palette without letting theme-set pick its own background, then
+# point the background at the image the colors came from.
+OMARCHY_THEME_SKIP_BACKGROUND=1 omarchy-theme-set "$THEME_NAME" || exit 1
+omarchy-theme-bg-set "$BACKGROUND"
