@@ -61,6 +61,14 @@ BarWidget {
         bar: root.bar
         text: focused ? "\uDB85\uDCFB" : (modelData === 10 ? "0" : String(modelData))
         opacity: occupied || focused ? 1 : 0.5
+        // Active workspace gets the theme's primary accent; an occupied-but-
+        // unfocused one gets a dimmed version of that same accent as a
+        // "secondary" so it still reads as "has windows" without competing
+        // with the focused one. Color.muted isn't used here -- on this
+        // theme (Matte Black) it's #333 against a #121212 background,
+        // nearly invisible as text. An empty workspace is left at the
+        // widget's own default (unchanged).
+        foreground: focused ? Color.accent : (occupied ? Util.alpha(Color.accent, 0.5) : (root.bar ? root.bar.barForeground : Color.foreground))
         horizontalMargin: 6
         verticalPadding: 6
         fixedWidth: root.vertical ? root.barSize : Style.space(20)
