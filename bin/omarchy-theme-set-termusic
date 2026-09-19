@@ -1,0 +1,89 @@
+#!/bin/bash
+
+# omarchy:summary=Apply current Omarchy theme colors to termusic's [theme.*] config
+# omarchy:hidden=true
+
+CONFIG="$HOME/.config/termusic/tui.toml"
+COLORS_TOML="$HOME/.local/state/omarchy/current/theme/colors.toml"
+THEME_NAME_FILE="$HOME/.local/state/omarchy/current/theme.name"
+
+[[ -f $CONFIG && -f $COLORS_TOML ]] || exit 0
+
+theme_color() {
+  omarchy-theme-color --file "$COLORS_TOML" "$@"
+}
+
+theme_name=$(cat "$THEME_NAME_FILE" 2>/dev/null || echo "omarchy")
+theme_name=$(echo "$theme_name" | sed -E 's/[-_]+/ /g; s/(^| )([a-z])/\1\U\2/g')
+background=$(theme_color background)
+foreground=$(theme_color foreground)
+accent=$(theme_color accent blue)
+[[ -n $background && -n $foreground && -n $accent ]] || exit 0
+
+block=$(mktemp)
+cat >"$block" <<EOF
+[theme]
+name = "$theme_name"
+author = "aayork"
+
+[theme.primary]
+background = "$background"
+foreground = "$foreground"
+
+[theme.cursor]
+text = "$background"
+cursor = "$accent"
+
+[theme.normal]
+black = "$(theme_color darker_background "$background")"
+red = "$(theme_color red)"
+green = "$(theme_color green)"
+yellow = "$(theme_color yellow)"
+blue = "$accent"
+magenta = "$(theme_color magenta)"
+cyan = "$(theme_color cyan)"
+white = "$(theme_color foreground)"
+
+[theme.bright]
+black = "$(theme_color muted)"
+red = "$(theme_color bright_red)"
+green = "$(theme_color bright_green)"
+yellow = "$(theme_color bright_yellow)"
+blue = "$(theme_color bright_blue "$accent")"
+magenta = "$(theme_color bright_magenta)"
+cyan = "$(theme_color bright_cyan)"
+white = "$(theme_color bright_foreground)"
+
+EOF
+
+# Splice the freshly rendered block in place of any existing [theme] /
+# [theme.*] sections, leaving [style.*]/[keys.*]/[coverart]/[behavior] --
+# the user's own customizations -- untouched. [style.*] entries reference
+# these sections by symbolic name (Blue, LightBlack, ...), so they pick up
+# the new palette automatically without being rewritten themselves.
+tmp=$(mktemp)
+awk -v newblock="$block" '
+  function is_theme_header(l) { return l ~ /^\[theme(\.[A-Za-z_]+)?\][[:space:]]*(#.*)?$/ }
+  {
+    if (is_theme_header($0)) {
+      if (!inserted) {
+        while ((getline line < newblock) > 0) print line
+        inserted = 1
+      }
+      skipping = 1
+      next
+    }
+    if (skipping) {
+      if ($0 ~ /^\[[^]]+\]/) skipping = 0
+      else next
+    }
+    print
+  }
+' "$CONFIG" >"$tmp"
+
+mv "$tmp" "$CONFIG"
+rm -f "$block"
+
+# No live-reload hook exists for a running termusic instance (and this fork's
+# earlier crash investigation found its SIGINT/cleanup path is already
+# fragile -- see memory), so this only takes effect on termusic's next launch.
