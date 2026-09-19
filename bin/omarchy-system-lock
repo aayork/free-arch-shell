@@ -19,8 +19,7 @@ if pgrep -x "1password" >/dev/null && omarchy-cmd-present 1password; then
   ) 9>"${XDG_RUNTIME_DIR:-/tmp}/omarchy-1password-lock.lock" &
 fi
 
-# Avoid running screensaver when locked
-pkill -x ttfx 2>/dev/null || true
-# ttfx handles SIGTERM asynchronously, so keep its terminal alive until it exits.
-timeout 1s pidwait -x ttfx 2>/dev/null || true
-pkill -f '[o]rg.omarchy.screensaver' 2>/dev/null || true
+# Avoid running the screensaver when locked. Matches on the launcher's own
+# flag rather than the mpv binary name, so it never touches an mpv instance
+# the user opened themselves.
+pkill -f -- '--wayland-app-id=org.omarchy.screensaver' 2>/dev/null || true
