@@ -82,7 +82,14 @@ Item {
     // inherit wayland-wm@.service. Keeping gtk-launch as the desktop-entry
     // resolver supports IDs with spaces and entries that UWSM rejects.
     // Keep the .desktop suffix or ids like org.telegram.desktop won't resolve.
-    Util.execDetached("uwsm-app -- gtk-launch " + Util.shellQuote(id + ".desktop"))
+    // uwsm-app requires a full UWSM-managed session (real Omarchy installs
+    // one); this fork runs plain Hyprland, so fall back to bare gtk-launch
+    // when it's absent instead of silently no-op'ing on every launch.
+    var launchCommand = id + ".desktop"
+    Util.execDetached(
+      "if command -v uwsm-app >/dev/null 2>&1; then uwsm-app -- gtk-launch "
+      + Util.shellQuote(launchCommand) + "; else gtk-launch " + Util.shellQuote(launchCommand) + "; fi"
+    )
   }
 
   function remove(desktopId, name) {

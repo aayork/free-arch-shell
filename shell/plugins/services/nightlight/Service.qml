@@ -46,8 +46,13 @@ Item {
   }
 
   function runApply(temp) {
+    // uwsm-app requires a full UWSM-managed session (real Omarchy installs
+    // one); this fork runs plain Hyprland, so fall back to bare hyprsunset
+    // when it's absent instead of silently no-op'ing on every toggle.
     applyProcess.command = ["bash", "-lc",
-      "pgrep -x hyprsunset >/dev/null || { setsid uwsm-app -- hyprsunset >/dev/null 2>&1 & sleep 1; }; " +
+      "pgrep -x hyprsunset >/dev/null || { " +
+      "if command -v uwsm-app >/dev/null 2>&1; then setsid uwsm-app -- hyprsunset >/dev/null 2>&1 & " +
+      "else setsid hyprsunset >/dev/null 2>&1 & fi; sleep 1; }; " +
       "hyprctl hyprsunset temperature " + Number(temp)]
     applyProcess.running = true
   }
