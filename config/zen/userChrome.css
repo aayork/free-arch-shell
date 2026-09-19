@@ -1,0 +1,45 @@
+/* Flattens Zen's browser chrome (tabs, url bar, toolbar buttons, panels/menus)
+ * to match hyprland.lua's decoration.rounding = 0.
+ *
+ * zen.theme.border-radius=0 (set via prefs.js by omarchy-theme-set-zen)
+ * covers --zen-border-radius, but a lot of Zen's chrome redeclares its own
+ * radius tokens on specific containers (#navigator-toolbox, .urlbar, tab
+ * strip, panel popups, glance) rather than inheriting the root one, so those
+ * need their own override. `*|*` (any element, any namespace) + !important
+ * beats those un-important per-container declarations regardless of where
+ * they're set.
+ *
+ * Deliberately NOT touched: genuinely circular/pill decorative bits (avatar
+ * dots, media-control pills, the workspace switcher's rounded track) --
+ * those use border-radius: 50%/999px to be circles, not "corners", and
+ * forcing them to 0 turns round icons into broken-looking squares rather
+ * than flattening anything meaningful.
+ */
+
+*|* {
+  --zen-border-radius: 0px !important;
+  --zen-native-inner-radius: 0px !important;
+  --toolbarbutton-border-radius: 0px !important;
+  --panel-border-radius: 0px !important;
+  --arrowpanel-menuitem-border-radius: 0px !important;
+  --border-radius-medium: 0px !important;
+  --border-radius-small: 0px !important;
+  --tab-border-radius: 0px !important;
+}
+
+#TabsToolbar,
+#navigator-toolbox,
+#nav-bar,
+#urlbar,
+#urlbar-background,
+.urlbar,
+.urlbarView,
+.urlbarView-row,
+panel,
+menupopup,
+.panel-arrowcontent,
+.tabbrowser-tab .tab-background,
+toolbarbutton,
+.toolbarbutton-1 {
+  border-radius: 0 !important;
+}
