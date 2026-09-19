@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# omarchy:summary=Toggle bar transparency
+# omarchy:args=[--status]
+# omarchy:examples=omarchy toggle bar-transparency
+
+if [[ ${1:-} == "--status" ]]; then
+  omarchy-shell shell listShellConfig | jq -c '{enabled: (.bar.transparent == true)}'
+  exit 0
+fi
+
+omarchy-shell shell toggleBarTransparency >/dev/null
