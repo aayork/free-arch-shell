@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "omarchy.settings",
+  "name": "Settings",
+  "version": "1.0.0",
+  "author": "aidan",
+  "description": "Theme, font, cursor, and icon theme picker",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Settings.qml"
+  }
+}
