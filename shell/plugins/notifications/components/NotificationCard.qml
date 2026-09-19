@@ -35,8 +35,11 @@ BorderSurface {
   signal closeRequested()
   signal cardClicked()
   // Prefer per-notification media/avatar data, then fall back to the app icon.
-  // The `check` flag avoids Qt's missing-texture placeholder for unknown names.
-  readonly property string smallIconSource: image.length > 0 ? image : iconSource(appIcon)
+  // `image` isn't always real avatar data: a sender's `image-path` hint can
+  // itself be a bare theme-icon name, and Quickshell resolves that through
+  // the same always-succeeds icon:// provider `iconSource()` below guards
+  // against, so the result gets the same validation either way.
+  readonly property string smallIconSource: validatedIconUrl(image.length > 0 ? image : iconSource(appIcon))
   readonly property bool hasGlyph: glyph.length > 0
   readonly property bool compactGlyph: NotificationLogic.shouldRenderCompactGlyph(glyph, smallIconSource, singleLineToast)
   readonly property bool hasSmallIcon: smallIconSource.length > 0
@@ -60,7 +63,25 @@ BorderSurface {
     if (value.length === 0) return ""
     if (value.indexOf("file://") === 0 || value.indexOf("image://") === 0) return value
     if (value.charAt(0) === "/") return Util.fileUrl(value)
-    return Quickshell.iconPath(value, true)
+    // iconPath's own `check` flag does not, in practice, suppress Qt's
+    // magenta/black missing-icon texture for a themed name with no match —
+    // it still resolves to something that loads and renders. hasThemeIcon()
+    // is the real existence check; only call iconPath once it says yes.
+    if (!Quickshell.hasThemeIcon(value)) return ""
+    return Quickshell.iconPath(value)
+  }
+
+  // Quickshell's `image://icon/<name>` provider hands back a loadable URL
+  // for any name at all, found or not, which is how a bogus `image-path`
+  // hint slips past iconSource()'s own guard for a bare name: by the time it
+  // gets here it is already a URL, not a name. Unwrap it and apply the same
+  // check. Any other source (a real file:// avatar, another provider) is
+  // genuine image data and passes through untouched.
+  function validatedIconUrl(source) {
+    var value = String(source || "")
+    var match = value.match(/^image:\/\/icon\/(.+)$/)
+    if (!match) return value
+    return Quickshell.hasThemeIcon(decodeURIComponent(match[1])) ? value : ""
   }
 
   implicitWidth: Style.space(380)
