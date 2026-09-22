@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "roseshell.calendar",
+  "name": "Calendar",
+  "version": "1.0.0",
+  "author": "Roseshell",
+  "license": "MIT",
+  "description": "Today's events synced from iCloud (CalDAV, read/write) and ICS feed accounts, with account management in the Roseshell bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Calendar",
+    "description": "Today's events from your connected calendar accounts.",
+    "category": "Time",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 300
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 30,
+        "max": 3600,
+        "step": 30,
+        "defaultValue": 300
+      }
+    ]
+  }
+}
