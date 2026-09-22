@@ -2,7 +2,7 @@
 
 One bar icon and one panel for every AI coding subscription on the machine.
 The panel is strictly a display: it watches the usage records that
-`omarchy-agent-usage-update` writes to `~/.local/state/omarchy/agents/usage/`
+`roseshell-agent-usage-update` writes to `~/.local/state/roseshell/agents/usage/`
 and draws whatever appears there. `Panel.qml` owns the bar button and the
 popup; `Main.qml` discovers and watches the records (and handles the optional
 cross-device aggregation); `Agent.qml` is the per-record file watcher.
@@ -34,13 +34,13 @@ shows up at the next refresh, so nothing polls the disk waiting for it.
 That self-hiding is why the widget ships in the default bar layout: a machine
 that has never run an AI coding agent draws nothing, and the icon arrives on
 its own the first time a scan finds usage. Drop it with
-`omarchy plugin disable omarchy.agents`.
+`roseshell plugin disable roseshell.agents`.
 
 ## Data
 
-Each agent is one JSON record in `~/.local/state/omarchy/agents/usage/`,
-written by `omarchy-agent-usage-update`. That command runs one
-`omarchy-agent-usage-<agent>` collector per agent; the widget invokes it
+Each agent is one JSON record in `~/.local/state/roseshell/agents/usage/`,
+written by `roseshell-agent-usage-update`. That command runs one
+`roseshell-agent-usage-<agent>` collector per agent; the widget invokes it
 on its refresh timer and whenever you ask for a refresh, and picks up any
 record that lands in the directory regardless of who wrote it.
 
@@ -72,7 +72,7 @@ August 2026 no console-issued API key passes it — Fireworks appears to
 reserve it for the dashboard session. The probe stays because it is cheap
 and the live figure lights up automatically if Fireworks ever opens it to
 keys. Until then the collector falls back to estimating the balance from
-configuration in `~/.config/omarchy/agents/fireworks.json`:
+configuration in `~/.config/roseshell/agents/fireworks.json`:
 
 ```json
 {
@@ -97,13 +97,13 @@ only adds the meter and the spent-of-funded line under the real figure.
 - Bar icon: left = panel, right = launch agent, middle = next subscription.
 - Panel: `h`/`l` switch subscription, `j`/`k` scroll, `r` or Enter refresh,
   Tab moves to the neighboring bar panel, Esc closes.
-- IPC: `omarchy-shell omarchy.agents <open|close|toggle|refresh|next>`.
+- IPC: `roseshell-shell roseshell.agents <open|close|toggle|refresh|next>`.
 
 ## Settings
 
-Settings live in the widget's entry in `~/.config/omarchy/shell.json`. The
+Settings live in the widget's entry in `~/.config/roseshell/shell.json`. The
 top-level keys can be set with
-`omarchy bar set omarchy.agents <key> <value>`:
+`roseshell bar set roseshell.agents <key> <value>`:
 
 | Key | Default | What it does |
 |---|---|---|
@@ -116,8 +116,8 @@ top-level keys can be set with
 Numbers need `--json`, or they land in `shell.json` as strings:
 
 ```bash
-omarchy bar set omarchy.agents refreshIntervalSec 300 --json
-omarchy bar set omarchy.agents syncDir '~/Sync/agent-usage'
+roseshell bar set roseshell.agents refreshIntervalSec 300 --json
+roseshell bar set roseshell.agents syncDir '~/Sync/agent-usage'
 ```
 
 Per-agent enablement is nested, and `set` writes its key literally rather
@@ -125,7 +125,7 @@ than walking a dotted path — so pass the whole `providers` object as JSON (or
 edit `shell.json` directly):
 
 ```bash
-omarchy bar set omarchy.agents providers '{
+roseshell bar set roseshell.agents providers '{
   "claude": { "enabled": true },
   "codex": { "enabled": false },
   "fireworks": { "enabled": true }

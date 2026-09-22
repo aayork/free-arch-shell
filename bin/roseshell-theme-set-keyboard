@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# roseshell:summary=Apply the current theme keyboard color to supported keyboards
+# roseshell:hidden=true
+
+roseshell-theme-set-keyboard-asus-rog
+roseshell-theme-set-keyboard-f16

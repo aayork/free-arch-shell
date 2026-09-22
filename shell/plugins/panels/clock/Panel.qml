@@ -16,8 +16,8 @@ import "Model.js" as Model
 // anchor against.
 Panel {
   id: root
-  moduleName: "omarchy.clock"
-  ipcTarget: "omarchy.clock"
+  moduleName: "roseshell.clock"
+  ipcTarget: "roseshell.clock"
   manageIpc: false
 
   property var anchorItem: null

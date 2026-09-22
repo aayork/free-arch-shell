@@ -22,14 +22,14 @@ ShellRoot {
 
   property string home: Quickshell.env("HOME")
 
-  // The omarchy-shell host is the long-running entry point. Plugins live in
-  // sibling directories under plugins/. OMARCHY_PATH is provided by the uwsm
+  // The roseshell-shell host is the long-running entry point. Plugins live in
+  // sibling directories under plugins/. ROSESHELL_PATH is provided by the uwsm
   // session environment and is the single source of truth for this checkout.
-  property string omarchyPath: Quickshell.env("OMARCHY_PATH")
-  readonly property string shellPath: omarchyPath + "/shell"
+  property string roseshellPath: Quickshell.env("ROSESHELL_PATH")
+  readonly property string shellPath: roseshellPath + "/shell"
   readonly property string firstPartyPluginsDir: shellPath + "/plugins"
-  readonly property string defaultsPath: omarchyPath + "/config/omarchy/shell.json"
-  readonly property string userConfigPath: home + "/.config/omarchy/shell.json"
+  readonly property string defaultsPath: roseshellPath + "/config/roseshell/shell.json"
+  readonly property string userConfigPath: home + "/.config/roseshell/shell.json"
 
   // Bundled fallback so the shell can start even when the default shell.json is
   // missing or unreadable. The bar config here mirrors the on-disk defaults
@@ -43,11 +43,11 @@ ShellRoot {
     bar: {
       position: "top",
       transparent: false,
-      centerAnchor: "omarchy.clock",
+      centerAnchor: "roseshell.clock",
       layout: {
-        left: [{ id: "omarchy.menu" }, { id: "omarchy.workspaces" }],
-        center: [{ id: "omarchy.clock", format: "dddd HH:mm" }],
-        right: [{ id: "omarchy.audio" }]
+        left: [{ id: "roseshell.menu" }, { id: "roseshell.workspaces" }],
+        center: [{ id: "roseshell.clock", format: "dddd HH:mm" }],
+        right: [{ id: "roseshell.audio" }]
       }
     },
     plugins: []
@@ -143,8 +143,8 @@ ShellRoot {
   }
 
   Component.onCompleted: {
-    console.log("omarchy-shell paths",
-      "omarchyPath=" + shell.omarchyPath,
+    console.log("roseshell-shell paths",
+      "roseshellPath=" + shell.roseshellPath,
       "shellDir=" + Quickshell.shellDir,
       "firstPartyPluginsDir=" + shell.firstPartyPluginsDir,
       "defaultsPath=" + shell.defaultsPath,
@@ -167,7 +167,7 @@ ShellRoot {
 
   // Exposed as a property so child plugins (notifications, future panels)
   // can read barSize/barHidden/position to anchor relative to the active bar.
-  readonly property string defaultBarId: "omarchy.bar"
+  readonly property string defaultBarId: "roseshell.bar"
   readonly property string selectedBarId: {
     var config = shell.barConfig
     if (Util.isPlainObject(config)) {
@@ -217,7 +217,7 @@ ShellRoot {
 
   function configureBar(target, manifest) {
     if (!target) return
-    if ("omarchyPath" in target) target.omarchyPath = shell.omarchyPath
+    if ("roseshellPath" in target) target.roseshellPath = shell.roseshellPath
     if ("shell" in target) target.shell = shell.pluginShellFor(manifest)
     if ("manifest" in target) target.manifest = shell.publicPluginManifest(manifest)
     if ("barWidgetRegistry" in target) target.barWidgetRegistry = shell.pluginBarWidgetRegistryFor(manifest)
@@ -230,7 +230,7 @@ ShellRoot {
     id: defaultBarComponent
 
     Bar {
-      omarchyPath: shell.omarchyPath
+      roseshellPath: shell.roseshellPath
       barWidgetRegistry: shell.barWidgetRegistry
       barConfig: shell.barConfig
       shell: shell
@@ -356,21 +356,21 @@ ShellRoot {
   }
 
   function publicIdleConfigFor(manifest) {
-    var metadata = manifest && Util.isPlainObject(manifest.omarchy) ? manifest.omarchy : null
-    if (!metadata || String(metadata.clonedFrom || "") !== "omarchy.idle") return ({})
+    var metadata = manifest && Util.pluginMetadata(manifest)
+    if (!metadata || String(metadata.clonedFrom || "") !== "roseshell.idle") return ({})
     var idle = shell.shellConfig && Util.isPlainObject(shell.shellConfig.idle)
       ? shell.shellConfig.idle : ({})
     return JSON.parse(JSON.stringify(idle))
   }
 
   function pluginCloneMaySummon(manifest, requestedId) {
-    var metadata = manifest && Util.isPlainObject(manifest.omarchy) ? manifest.omarchy : null
+    var metadata = manifest && Util.pluginMetadata(manifest)
     var sourceId = metadata ? String(metadata.clonedFrom || "") : ""
     var allowed = {
-      "omarchy.audio": ["omarchy.osd"],
-      "omarchy.media": ["omarchy.osd"],
-      "omarchy.monitor": ["omarchy.osd"],
-      "omarchy.network": ["omarchy.speedtest", "omarchy.wifiqr"]
+      "roseshell.audio": ["roseshell.osd"],
+      "roseshell.media": ["roseshell.osd"],
+      "roseshell.monitor": ["roseshell.osd"],
+      "roseshell.network": ["roseshell.speedtest", "roseshell.wifiqr"]
     }
     var targets = allowed[sourceId] || []
     return targets.indexOf(String(requestedId || "")) !== -1
@@ -451,7 +451,7 @@ ShellRoot {
 
   function pluginFirstPartyServiceFor(cacheKey, pluginId, requestedId) {
     var id = String(requestedId || "")
-    var allowed = ["omarchy.idle", "omarchy.media", "omarchy.nightlight", "omarchy.notifications"]
+    var allowed = ["roseshell.idle", "roseshell.media", "roseshell.nightlight", "roseshell.notifications"]
     if (allowed.indexOf(id) === -1) return null
     var proxyKey = cacheKey + "::" + id
     if (_pluginFirstPartyServiceApis[proxyKey]) return _pluginFirstPartyServiceApis[proxyKey]
@@ -583,7 +583,7 @@ ShellRoot {
     // property, even though the resulting proxy is otherwise acyclic.
     var firstPartyServices = ({})
     if (barCapabilities) {
-      var serviceIds = ["omarchy.idle", "omarchy.media", "omarchy.nightlight", "omarchy.notifications"]
+      var serviceIds = ["roseshell.idle", "roseshell.media", "roseshell.nightlight", "roseshell.notifications"]
       for (var i = 0; i < serviceIds.length; i++) {
         var serviceId = serviceIds[i]
         firstPartyServices[serviceId] = shell.pluginFirstPartyServiceFor(cacheKey, key, serviceId)
@@ -914,7 +914,7 @@ ShellRoot {
         console.warn("service plugin createObject returned null for", key)
         return
       }
-      if ("omarchyPath" in inst) inst.omarchyPath = shell.omarchyPath
+      if ("roseshellPath" in inst) inst.roseshellPath = shell.roseshellPath
       if ("shell" in inst) inst.shell = shell.pluginShellFor(manifest)
       if ("manifest" in inst) inst.manifest = shell.publicPluginManifest(manifest)
       if ("barWidgetRegistry" in inst) inst.barWidgetRegistry = shell.pluginBarWidgetRegistryFor(manifest)
@@ -1017,7 +1017,7 @@ ShellRoot {
   }
 
   // keepLoaded services (lock, idle, polkit) must survive plugin hot-reload.
-  // Destroying omarchy.lock drops the ext-session-lock client while Hyprland
+  // Destroying roseshell.lock drops the ext-session-lock client while Hyprland
   // still holds the lock, which surfaces the crashed-lockscreen fallback.
   function unloadPluginServices() {
     var next = ({})
@@ -1130,7 +1130,7 @@ ShellRoot {
     if (!m || !Array.isArray(m.kinds)) return false
     if (m.kinds.indexOf("bar-widget") === -1) return false
     // Plugins that are also panel/overlay/menu kinds are owned by the
-    // panel loader (e.g. omarchy.menu); let that path handle them.
+    // panel loader (e.g. roseshell.menu); let that path handle them.
     var loaderKinds = ["panel", "overlay", "menu"]
     for (var i = 0; i < loaderKinds.length; i++) {
       if (m.kinds.indexOf(loaderKinds[i]) !== -1) return false
@@ -1327,7 +1327,7 @@ ShellRoot {
         asynchronous: true
         onLoaded: {
           if (!item) return
-          if ("omarchyPath" in item) item.omarchyPath = shell.omarchyPath
+          if ("roseshellPath" in item) item.roseshellPath = shell.roseshellPath
           if ("shell" in item) item.shell = shell.pluginShellFor(panelEntry.manifest)
           if ("manifest" in item) item.manifest = shell.publicPluginManifest(panelEntry.manifest)
           if ("barWidgetRegistry" in item) item.barWidgetRegistry = shell.pluginBarWidgetRegistryFor(panelEntry.manifest)
@@ -1516,7 +1516,7 @@ ShellRoot {
   // --------------------------------------------------- image selector IPC
 
   function imagePickerItem() {
-    var loader = panelLoaders["omarchy.image-picker"]
+    var loader = panelLoaders["roseshell.image-picker"]
     return loader && loader.item ? loader.item : null
   }
 
@@ -1539,7 +1539,7 @@ ShellRoot {
         showLabels: showLabels,
         filterable: filterable
       })
-      return shell.summon("omarchy.image-picker", payload) ? "ok" : "unknown"
+      return shell.summon("roseshell.image-picker", payload) ? "ok" : "unknown"
     }
 
     function preload(imageRowsB64: string,
@@ -1559,7 +1559,7 @@ ShellRoot {
       if (picker && typeof picker.closeSelector === "function") {
         picker.closeSelector(doneFile || "")
       } else {
-        shell.hide("omarchy.image-picker")
+        shell.hide("roseshell.image-picker")
       }
       return "ok"
     }
@@ -1659,13 +1659,13 @@ ShellRoot {
         var isBarOption = Array.isArray(kinds) && kinds.indexOf("bar") !== -1
         var isBarWidget = Array.isArray(kinds) && kinds.indexOf("bar-widget") !== -1
         var active = isBarOption && shell.isActiveBarOption(id)
-        var metadata = plugins[id].omarchy
+        var metadata = Util.pluginMetadata(plugins[id])
         var clonedFrom = Util.isPlainObject(metadata) ? String(metadata.clonedFrom || "") : ""
         out.push({
           id: id,
           name: plugins[id].name,
           kinds: kinds,
-          // What `omarchy plugin enable/disable` toggles: for a widget that is
+          // What `roseshell plugin enable/disable` toggles: for a widget that is
           // its place in the bar, not whether its component is loadable.
           enabled: isBarOption ? active
             : (isBarWidget ? shell.pluginRegistry.inBar(id) : shell.pluginRegistry.isEnabled(id)),

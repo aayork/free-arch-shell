@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# roseshell:summary=Reload hyprland configuration (used by the Roseshell theme switching).
+
+hyprctl reload >/dev/null

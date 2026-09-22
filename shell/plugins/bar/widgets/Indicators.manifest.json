@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "omarchy.indicators",
+  "id": "roseshell.indicators",
   "name": "Indicators",
   "version": "1.0.0",
-  "author": "Omarchy",
+  "author": "Roseshell",
   "description": "Manual state indicators",
   "kinds": [
     "bar-widget"
@@ -67,7 +67,7 @@
       }
     ]
   },
-  "omarchy": {
+  "roseshell": {
     "clonePaths": [
       {
         "source": "../indicators",

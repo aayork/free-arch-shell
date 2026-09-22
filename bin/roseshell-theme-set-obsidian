@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# roseshell:summary=Sync Roseshell theme to all Obsidian vaults
+# roseshell:hidden=true
+
+CURRENT_THEME_DIR="$HOME/.local/state/roseshell/current/theme"
+
+[[ -f $CURRENT_THEME_DIR/obsidian.css ]] || exit 0
+
+jq -r '.vaults | values[].path' ~/.config/obsidian/obsidian.json 2>/dev/null | while read -r vault_path; do
+  [[ -d $vault_path/.obsidian ]] || continue
+
+  theme_dir="$vault_path/.obsidian/themes/Roseshell"
+  mkdir -p "$theme_dir"
+
+  [[ -f $theme_dir/manifest.json ]] || cat >"$theme_dir/manifest.json" <<'EOF'
+{
+  "name": "Roseshell",
+  "version": "1.0.0",
+  "minAppVersion": "0.16.0",
+  "description": "Automatically syncs with your current Roseshell system theme colors and fonts",
+  "author": "Roseshell",
+  "authorUrl": "https://github.com/aayork/free-arch-shell"
+}
+EOF
+
+  cp "$CURRENT_THEME_DIR/obsidian.css" "$theme_dir/theme.css"
+done

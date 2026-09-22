@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# roseshell:summary=Toggle bar transparency
+# roseshell:args=[--status]
+# roseshell:examples=roseshell toggle bar-transparency
+
+if [[ ${1:-} == "--status" ]]; then
+  roseshell-shell shell listShellConfig | jq -c '{enabled: (.bar.transparent == true)}'
+  exit 0
+fi
+
+roseshell-shell shell toggleBarTransparency >/dev/null

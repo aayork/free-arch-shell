@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# roseshell:summary=List available monospace fonts
+# roseshell:examples=roseshell font list | roseshell font set "CaskaydiaMono Nerd Font"
+
+fc-list :spacing=100 -f "%{family[0]}\n" | grep -v -i -E 'emoji|signwriting|roseshell' | sort -u

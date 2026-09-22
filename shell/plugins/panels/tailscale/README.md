@@ -1,6 +1,6 @@
-# Tailscale Omarchy Widget
+# Tailscale Roseshell Widget
 
-Native Omarchy bar widget for Tailscale.
+Native Roseshell bar widget for Tailscale.
 
 ## Features
 
@@ -35,9 +35,9 @@ Inside the panel:
 ## Receiving files
 
 Incoming Taildrop files are saved to `~/Downloads` by the
-`omarchy-tailscale-receive` service, which announces each one with a
+`roseshell-tailscale-receive` service, which announces each one with a
 notification (an image preview when the file is an image, and a click to open
-it). The Tailscale service install enables it; `omarchy tailscale receive`
+it). The Tailscale service install enables it; `roseshell tailscale receive`
 runs the same loop by hand.
 
 ## Icon
@@ -46,4 +46,4 @@ Renders the Tailscale mark natively as a theme-colored 3×3 dot grid, matching t
 
 ## Add to the bar
 
-This widget ships as first-party plugin `omarchy.tailscale`. Add it with `omarchy plugin enable omarchy.tailscale`, then place it with `omarchy bar move omarchy.tailscale` if desired.
+This widget ships as first-party plugin `roseshell.tailscale`. Add it with `roseshell plugin enable roseshell.tailscale`, then place it with `roseshell bar move roseshell.tailscale` if desired.

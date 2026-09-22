@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# roseshell:summary=Refresh the current theme from its templates.
+
+THEME_NAME_PATH="$HOME/.local/state/roseshell/current/theme.name"
+
+if [[ -f $THEME_NAME_PATH ]]; then
+  ROSESHELL_THEME_SKIP_BACKGROUND=1 roseshell-theme-set "$(cat $THEME_NAME_PATH)"
+fi

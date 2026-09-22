@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# roseshell:summary=Open the Roseshell background switcher
+# roseshell:group=theme
+# roseshell:name=bg-switcher
+# roseshell:aliases=roseshell background
+
+theme_name=$(cat "$HOME/.local/state/roseshell/current/theme.name" 2>/dev/null)
+current_background=$(readlink -f "$HOME/.local/state/roseshell/current/background" 2>/dev/null)
+
+roseshell-menu-images \
+  --selected "$current_background" \
+  "$HOME/.local/state/roseshell/current/theme/backgrounds" \
+  "$HOME/.config/roseshell/backgrounds/$theme_name"

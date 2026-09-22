@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# roseshell:summary=Wake displays and restore brightness after idle
+# roseshell:group=system
+# roseshell:name=wake
+# roseshell:examples=roseshell system wake
+
+roseshell-brightness-display on
+roseshell-hyprland-monitor-clamshell >/dev/null 2>&1 || true

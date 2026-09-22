@@ -71,8 +71,27 @@ QtObject {
     return value !== null && typeof value === "object" && !Array.isArray(value)
   }
 
+  // Plugin manifests declare host metadata (capabilities, clonedFrom, ...)
+  // under a "roseshell" key. Older plugins written against this shell's
+  // previous name may still ship that same block under "omarchy" -- keep
+  // reading both so third-party plugins built before the rename still work.
+  function pluginMetadata(manifest) {
+    if (!isPlainObject(manifest)) return null
+    if (isPlainObject(manifest.roseshell)) return manifest.roseshell
+    if (isPlainObject(manifest.omarchy)) return manifest.omarchy
+    return null
+  }
+
   function canonicalWidgetId(id) {
-    return String(id || "")
+    var s = String(id || "")
+    // The "omarchy." namespace was always first-party (this shell's own
+    // plugins), never a third party's own id -- see pluginMetadata's note
+    // above. Plugins written before the rename (e.g. bo.omacast's
+    // Commands.js, which still calls "omarchy.settings"/"omarchy.network"/
+    // etc.) hardcode those old ids, so alias the whole namespace here
+    // rather than patching every vendored plugin's hardcoded ids one by one.
+    if (s.indexOf("omarchy.") === 0) return "roseshell." + s.slice("omarchy.".length)
+    return s
   }
 
   // Best-effort base64 decode. Returns "" on parse failure rather than

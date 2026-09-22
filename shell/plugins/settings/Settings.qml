@@ -12,7 +12,7 @@ import qs.Ui
 Item {
   id: root
 
-  property string omarchyPath: Quickshell.env("OMARCHY_PATH")
+  property string roseshellPath: Quickshell.env("ROSESHELL_PATH")
   property var shell: null
   property var manifest: null
 
@@ -44,7 +44,7 @@ Item {
   function dismiss() {
     root.opened = false
     if (root.shell && typeof root.shell.hide === "function")
-      root.shell.hide((root.manifest && root.manifest.id) || "omarchy.settings")
+      root.shell.hide((root.manifest && root.manifest.id) || "roseshell.settings")
   }
 
   function toggle() {
@@ -90,7 +90,7 @@ Item {
 
   Process {
     id: themeList
-    command: ["bash", "-c", "omarchy-theme-list"]
+    command: ["bash", "-c", "roseshell-theme-list"]
     property var lines: []
     onStarted: lines = []
     stdout: SplitParser { onRead: function(line) { if (line) themeList.lines.push(line) } }
@@ -99,16 +99,16 @@ Item {
 
   Process {
     id: themeCurrent
-    command: ["bash", "-c", "omarchy-theme-current"]
+    command: ["bash", "-c", "roseshell-theme-current"]
     stdout: SplitParser { onRead: function(line) { if (line) root.themeValue = line } }
   }
 
   // Backgrounds are scoped to the current theme (plus any user overrides in
-  // ~/.config/omarchy/backgrounds/<theme>/), same set omarchy-theme-bg-next
+  // ~/.config/roseshell/backgrounds/<theme>/), same set roseshell-theme-bg-next
   // cycles through. Listed as {value: full path, label: prettified name}
-  // since omarchy-theme-bg-set needs the path, not the display name.
-  readonly property string backgroundListCmd: "THEME_NAME=$(cat \"$HOME/.local/state/omarchy/current/theme.name\" 2>/dev/null); "
-    + "find -L \"$HOME/.config/omarchy/backgrounds/$THEME_NAME/\" \"$HOME/.local/state/omarchy/current/theme/backgrounds/\" -maxdepth 1 -type f "
+  // since roseshell-theme-bg-set needs the path, not the display name.
+  readonly property string backgroundListCmd: "THEME_NAME=$(cat \"$HOME/.local/state/roseshell/current/theme.name\" 2>/dev/null); "
+    + "find -L \"$HOME/.config/roseshell/backgrounds/$THEME_NAME/\" \"$HOME/.local/state/roseshell/current/theme/backgrounds/\" -maxdepth 1 -type f "
     + "\\( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.gif' -o -iname '*.bmp' -o -iname '*.webp' "
     + "-o -iname '*.mp4' -o -iname '*.m4v' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.mkv' -o -iname '*.avi' \\) 2>/dev/null "
     + "| sort -u | while read -r p; do label=$(basename -- \"$p\" | perl -pe 's/\\.[^.]+$//; s/^\\d+-//; s/-/ /g; s/\\b(\\w)/\\U$1/g'); printf '%s\\t%s\\n' \"$p\" \"$label\"; done"
@@ -131,13 +131,13 @@ Item {
 
   Process {
     id: backgroundCurrent
-    command: ["bash", "-c", "readlink -f \"$HOME/.local/state/omarchy/current/background\""]
+    command: ["bash", "-c", "readlink -f \"$HOME/.local/state/roseshell/current/background\""]
     stdout: SplitParser { onRead: function(line) { if (line) root.backgroundValue = line } }
   }
 
   Process {
     id: fontList
-    command: ["bash", "-c", "omarchy-font-list"]
+    command: ["bash", "-c", "roseshell-font-list"]
     property var lines: []
     onStarted: lines = []
     stdout: SplitParser { onRead: function(line) { if (line) fontList.lines.push(line) } }
@@ -146,7 +146,7 @@ Item {
 
   Process {
     id: fontCurrent
-    command: ["bash", "-c", "omarchy-font-current"]
+    command: ["bash", "-c", "roseshell-font-current"]
     stdout: SplitParser { onRead: function(line) { if (line) root.fontValue = line } }
   }
 
@@ -187,24 +187,24 @@ Item {
 
   function applyTheme(name) {
     root.themeValue = name
-    Util.execDetached("omarchy-theme-set " + Util.shellQuote(name))
-    // omarchy-theme-set takes ~800ms and picks its own starting background;
+    Util.execDetached("roseshell-theme-set " + Util.shellQuote(name))
+    // roseshell-theme-set takes ~800ms and picks its own starting background;
     // reload the background row once it's settled rather than racing it.
     backgroundRefreshDelay.restart()
   }
 
   function applyBackground(path) {
     root.backgroundValue = path
-    Util.execDetached("omarchy-theme-bg-set " + Util.shellQuote(path))
+    Util.execDetached("roseshell-theme-bg-set " + Util.shellQuote(path))
   }
 
   // Derives a palette from the current background and applies it as the
-  // generated "wallpaper" theme (see omarchy-theme-from-background). The script
+  // generated "wallpaper" theme (see roseshell-theme-from-background). The script
   // also re-homes the background under that theme, so once it exits reload the
   // theme and background rows to match.
   function matchThemeToBackground() {
     if (!root.backgroundValue) return
-    matchThemeProc.command = ["bash", "-c", "omarchy-theme-from-background \"$1\"", "bash", root.backgroundValue]
+    matchThemeProc.command = ["bash", "-c", "roseshell-theme-from-background \"$1\"", "bash", root.backgroundValue]
     matchThemeProc.running = true
   }
 
@@ -237,9 +237,9 @@ Item {
     var home = Quickshell.env("HOME")
     var dirs = home + "/Pictures\n" + home + "/Downloads"
     var runtimeDir = Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
-    var script = "sel=$(mktemp -u " + Util.shellQuote(runtimeDir + "/omarchy-bg-sel-XXXXXX") + "); "
-      + "done_f=$(mktemp -u " + Util.shellQuote(runtimeDir + "/omarchy-bg-done-XXXXXX") + "); "
-      + "omarchy-shell image-selector open " + Util.shellQuote(dirs) + " '' " + Util.shellQuote(root.backgroundValue)
+    var script = "sel=$(mktemp -u " + Util.shellQuote(runtimeDir + "/roseshell-bg-sel-XXXXXX") + "); "
+      + "done_f=$(mktemp -u " + Util.shellQuote(runtimeDir + "/roseshell-bg-done-XXXXXX") + "); "
+      + "roseshell-shell image-selector open " + Util.shellQuote(dirs) + " '' " + Util.shellQuote(root.backgroundValue)
       + " \"$sel\" \"$done_f\" true true >/dev/null; "
       + "for i in $(seq 1 600); do [ -e \"$done_f\" ] && break; sleep 0.2; done; "
       + "[ -f \"$sel\" ] && cat \"$sel\"; "
@@ -266,14 +266,14 @@ Item {
   // content gets a timestamp prefix instead of overwriting the earlier copy.
   function applyBackgroundFromFile(path) {
     var script = "src=$(realpath -- \"$1\") || exit 1; "
-      + "theme=$(cat \"$HOME/.local/state/omarchy/current/theme.name\" 2>/dev/null); "
-      + "dir=\"$HOME/.config/omarchy/backgrounds/$theme\"; "
-      + "themedir=$(realpath -m \"$HOME/.local/state/omarchy/current/theme/backgrounds\"); "
+      + "theme=$(cat \"$HOME/.local/state/roseshell/current/theme.name\" 2>/dev/null); "
+      + "dir=\"$HOME/.config/roseshell/backgrounds/$theme\"; "
+      + "themedir=$(realpath -m \"$HOME/.local/state/roseshell/current/theme/backgrounds\"); "
       + "case \"$src\" in \"$dir\"/*|\"$themedir\"/*) dest=$src ;; "
       + "*) mkdir -p \"$dir\" || exit 1; dest=\"$dir/${src##*/}\"; "
       + "if [ -e \"$dest\" ] && ! cmp -s \"$src\" \"$dest\"; then dest=\"$dir/$(date +%s)-${src##*/}\"; fi; "
       + "[ -e \"$dest\" ] || cp -- \"$src\" \"$dest\" || exit 1 ;; esac; "
-      + "omarchy-theme-bg-set \"$dest\" && printf '%s\\n' \"$dest\""
+      + "roseshell-theme-bg-set \"$dest\" && printf '%s\\n' \"$dest\""
     backgroundImportProc.command = ["bash", "-c", script, "bash", path]
     backgroundImportProc.running = true
   }
@@ -293,7 +293,7 @@ Item {
 
   function applyFont(name) {
     root.fontValue = name
-    Util.execDetached("omarchy-font-set " + Util.shellQuote(name))
+    Util.execDetached("roseshell-font-set " + Util.shellQuote(name))
   }
 
   function applyCursor(name) {
@@ -317,7 +317,7 @@ Item {
 
   Process {
     id: shellConfigProbe
-    command: ["bash", "-c", "omarchy-shell shell listShellConfig"]
+    command: ["bash", "-c", "roseshell-shell shell listShellConfig"]
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.parseShellConfig(text) }
   }
 
@@ -347,7 +347,7 @@ Item {
   }
 
   function moveBarWidgetToSection(id, section) {
-    Util.execDetached("omarchy-shell shell moveBarWidget " + Util.shellQuote(id) + " " + Util.shellQuote(JSON.stringify({ section: section })))
+    Util.execDetached("roseshell-shell shell moveBarWidget " + Util.shellQuote(id) + " " + Util.shellQuote(JSON.stringify({ section: section })))
     barConfigRefreshDelay.restart()
   }
 
@@ -359,7 +359,7 @@ Item {
 
   Process {
     id: nightlightProbe
-    command: ["bash", "-c", "omarchy-shell nightlight status"]
+    command: ["bash", "-c", "roseshell-shell nightlight status"]
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.parseNightlight(text) }
   }
 
@@ -373,12 +373,12 @@ Item {
 
   function toggleBarTransparency() {
     root.barTransparent = !root.barTransparent
-    Util.execDetached("omarchy-shell shell toggleBarTransparency")
+    Util.execDetached("roseshell-shell shell toggleBarTransparency")
   }
 
   function toggleNightlight() {
     root.nightlightEnabled = !root.nightlightEnabled
-    Util.execDetached("omarchy-shell nightlight toggle")
+    Util.execDetached("roseshell-shell nightlight toggle")
   }
 
   // ============================================================ plugins
@@ -400,7 +400,7 @@ Item {
 
   Process {
     id: pluginListProbe
-    command: ["bash", "-c", "omarchy-shell shell listPlugins"]
+    command: ["bash", "-c", "roseshell-shell shell listPlugins"]
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.parsePlugins(text) }
   }
 
@@ -426,7 +426,7 @@ Item {
       }
     }
     root.pluginList = list
-    Util.execDetached("omarchy-shell shell setPluginEnabled " + Util.shellQuote(id) + " " + (next ? "true" : "false"))
+    Util.execDetached("roseshell-shell shell setPluginEnabled " + Util.shellQuote(id) + " " + (next ? "true" : "false"))
     pluginRefreshDelay.restart()
   }
 
@@ -436,9 +436,9 @@ Item {
     onTriggered: pluginListProbe.running = true
   }
 
-  // Deletion is a real `rm -rf` of the plugin's directory (via omarchy-plugin
+  // Deletion is a real `rm -rf` of the plugin's directory (via roseshell-plugin
   // remove), only possible for community plugins installed under
-  // ~/.config/omarchy/plugins/<id> -- first-party ones (firstParty: true)
+  // ~/.config/roseshell/plugins/<id> -- first-party ones (firstParty: true)
   // never show the trash icon at all, so this never targets shell/plugins/*.
   property string pendingDeleteId: ""
   property string pendingDeleteName: ""
@@ -459,7 +459,7 @@ Item {
     root.pendingDeleteId = ""
     root.pendingDeleteName = ""
     if (!id) return
-    Util.execDetached("omarchy-plugin remove " + Util.shellQuote(id))
+    Util.execDetached("roseshell-plugin remove " + Util.shellQuote(id))
     pluginRefreshDelay.restart()
   }
 
@@ -470,7 +470,7 @@ Item {
     visible: root.opened
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
-    WlrLayershell.namespace: "omarchy-settings"
+    WlrLayershell.namespace: "roseshell-settings"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore

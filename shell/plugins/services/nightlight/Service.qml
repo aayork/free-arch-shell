@@ -5,10 +5,10 @@ import "NightlightModel.js" as NightlightModel
 Item {
   id: root
 
-  // Injected by omarchy-shell (the first-party service loader).
+  // Injected by roseshell-shell (the first-party service loader).
   property var shell: null
 
-  // Keep in sync with bin/omarchy-toggle-nightlight, which sets the same
+  // Keep in sync with bin/roseshell-toggle-nightlight, which sets the same
   // temperatures for callers outside the shell (keybindings, menu, ssh).
   readonly property int nightTemperature: 4000
   readonly property int dayTemperature: 6500
@@ -46,7 +46,7 @@ Item {
   }
 
   function runApply(temp) {
-    // uwsm-app requires a full UWSM-managed session (real Omarchy installs
+    // uwsm-app requires a full UWSM-managed session (real Roseshell installs
     // one); this fork runs plain Hyprland, so fall back to bare hyprsunset
     // when it's absent instead of silently no-op'ing on every toggle.
     applyProcess.command = ["bash", "-lc",

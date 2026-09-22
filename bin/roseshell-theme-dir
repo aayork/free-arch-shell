@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# roseshell:summary=Print the directory holding a theme, preferring a user-installed copy
+# roseshell:args=<theme-name>
+# roseshell:examples=roseshell theme dir tokyo-night
+
+theme="${1:-}"
+
+if [[ -z $theme ]]; then
+  echo "Usage: roseshell-theme-dir <theme-name>" >&2
+  exit 1
+fi
+
+if [[ -d $HOME/.config/roseshell/themes/$theme ]]; then
+  echo "$HOME/.config/roseshell/themes/$theme"
+else
+  echo "$ROSESHELL_PATH/themes/$theme"
+fi

@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# roseshell:summary=Cache background switcher thumbnails for the current theme
+
+theme_name=$(cat "$HOME/.local/state/roseshell/current/theme.name" 2>/dev/null)
+
+roseshell-menu-images \
+  --cache-only \
+  "$HOME/.local/state/roseshell/current/theme/backgrounds" \
+  "$HOME/.config/roseshell/backgrounds/$theme_name"

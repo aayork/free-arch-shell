@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# roseshell:summary=Launch the Apple aerial video screensaver, one mpv per monitor
+# roseshell:hidden=true
+
+# Invoked by the idle service (shell/plugins/services/idle/Service.qml) once
+# the screensaver timeout elapses. mpv's own input.conf (not this script) is
+# what dismisses it: the idle service tracks dismissal via the Hyprland
+# openwindow/closewindow events for the org.roseshell.screensaver class, not by
+# watching this process.
+pgrep -f -- '--wayland-app-id=org.roseshell.screensaver' >/dev/null && exit 0
+
+videos_dir="$HOME/Videos/aerial"
+
+shopt -s nullglob
+videos=("$videos_dir"/*.mov "$videos_dir"/*.mp4 "$videos_dir"/*.m4v)
+shopt -u nullglob
+
+(( ${#videos[@]} > 0 )) || exit 1
+
+focused=$(roseshell-hyprland-monitor-focused)
+
+for m in $(hyprctl monitors -j | jq -r '.[] | select(.disabled == false) | .name'); do
+  hyprctl dispatch focusmonitor "$m" >/dev/null
+
+  # panscan=1.0 crops the video to fill the screen instead of letterboxing,
+  # since the aerial videos are 16:9 and displays here are not.
+  mpv \
+    --wayland-app-id=org.roseshell.screensaver \
+    --fullscreen \
+    --no-osc \
+    --osd-level=0 \
+    --panscan=1.0 \
+    --input-conf="$HOME/.config/mpv/screensaver-input.conf" \
+    --loop-playlist=inf \
+    --shuffle \
+    --mute=yes \
+    --stop-screensaver=no \
+    --cursor-autohide=1000 \
+    --really-quiet \
+    --idle=no \
+    "${videos[@]}" &
+  disown
+
+  sleep 0.3
+done
+
+[[ -n $focused ]] && hyprctl dispatch focusmonitor "$focused" >/dev/null

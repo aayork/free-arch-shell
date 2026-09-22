@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "omarchy.lock",
+  "id": "roseshell.lock",
   "name": "Lock Screen",
   "version": "1.0.0",
-  "author": "Omarchy",
+  "author": "Roseshell",
   "description": "Quickshell session lock with separate password and fingerprint PAM flows.",
-  "omarchy": {
+  "roseshell": {
     "capabilities": [
       "authentication"
     ]

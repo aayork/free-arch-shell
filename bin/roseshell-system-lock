@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# roseshell:summary=Lock the computer and turn off the display
+# roseshell:group=system
+# roseshell:name=lock
+# roseshell:examples=roseshell system lock
+
+roseshell-shell lock lock >/dev/null
+
+# Set keyboard layout to default (first layout)
+hyprctl switchxkblayout all 0 > /dev/null 2>&1
+
+# Ensure 1password is locked. Use timeout because `1password --lock` can
+# otherwise leave a full Electron helper tree running after each lock.
+if pgrep -x "1password" >/dev/null && roseshell-cmd-present 1password; then
+  (
+    flock -n 9 || exit 0
+    timeout --kill-after=1s 3s 1password --lock >/dev/null 2>&1 || true
+  ) 9>"${XDG_RUNTIME_DIR:-/tmp}/roseshell-1password-lock.lock" &
+fi
+
+# Avoid running the screensaver when locked. Matches on the launcher's own
+# flag rather than the mpv binary name, so it never touches an mpv instance
+# the user opened themselves.
+pkill -f -- '--wayland-app-id=org.roseshell.screensaver' 2>/dev/null || true

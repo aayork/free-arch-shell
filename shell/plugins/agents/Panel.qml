@@ -7,8 +7,8 @@ import qs.Ui
 
 Panel {
   id: root
-  moduleName: "omarchy.agents"
-  ipcTarget: "omarchy.agents"
+  moduleName: "roseshell.agents"
+  ipcTarget: "roseshell.agents"
   manageIpc: false
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
@@ -60,7 +60,7 @@ Panel {
   }
 
   function launchAgent() {
-    if (root.bar) root.bar.run("omarchy-agent --pick")
+    if (root.bar) root.bar.run("roseshell-agent --pick")
     root.close()
   }
 

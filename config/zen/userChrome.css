@@ -1,7 +1,7 @@
 /* Flattens Zen's browser chrome (tabs, url bar, toolbar buttons, panels/menus)
  * to match hyprland.lua's decoration.rounding = 0.
  *
- * zen.theme.border-radius=0 (set via prefs.js by omarchy-theme-set-zen)
+ * zen.theme.border-radius=0 (set via prefs.js by roseshell-theme-set-zen)
  * covers --zen-border-radius, but a lot of Zen's chrome redeclares its own
  * radius tokens on specific containers (#navigator-toolbox, .urlbar, tab
  * strip, panel popups, glance) rather than inheriting the root one, so those

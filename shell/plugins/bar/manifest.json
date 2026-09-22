@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "omarchy.bar",
+  "id": "roseshell.bar",
   "name": "Bar",
   "version": "1.0.0",
-  "author": "Omarchy",
+  "author": "Roseshell",
   "description": "Status bar with widgets",
   "kinds": [
     "bar"
