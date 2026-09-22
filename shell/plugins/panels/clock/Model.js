@@ -1,13 +1,9 @@
-// Pure date and format math for the clock widget and its calendar panel.
+// Pure date/format math for the clock widget and its world-clock panel.
 // Everything here is locale- and Qt-free so it can be unit tested under node
-// (test/shell.d/clock-test.sh); the QML owns month/weekday naming through
-// Qt.locale().
+// (test/shell.d/clock-test.sh); the QML owns month/weekday naming and any
+// Qt.formatDateTime through Qt.locale().
 
 var MS_PER_DAY = 86400000
-
-// Weekday indices match both JS Date.getDay() and QML's Locale.Sunday…
-// Locale.Saturday, so a locale's firstDayOfWeek can be passed straight in.
-var WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 
 // ---- Bar label formats. Right-clicking the clock walks these in order and
 //      writes the result back to shell.json, so the label the bar shows and
@@ -50,6 +46,14 @@ function clockNeedsSeconds(format) {
   return /s/.test(text.replace(/'[^']*'?/g, ""))
 }
 
+// Whether a format is 24-hour (has "HH") vs 12-hour (has "h"/"AP") — the
+// world-clock panel matches whichever convention the bar label is already
+// using rather than asking for a separate preference.
+function clockUses24Hour(format) {
+  var text = String(format === undefined || format === null ? "" : format).replace(/'[^']*'?/g, "")
+  return /HH/.test(text)
+}
+
 function clockFormats(vertical) {
   return vertical ? VERTICAL_CLOCK_FORMATS.slice() : CLOCK_FORMATS.slice()
 }
@@ -78,67 +82,9 @@ function nextClockFormat(ring, current) {
   return ring[(index + 1) % ring.length]
 }
 
-// Two-digit ISO week, substituted into a format's 'ww' token before Qt
-// formats it -- Qt has no ISO week specifier of its own.
-function isoWeekLiteral(year, month, day) {
-  return pad2(isoWeek(year, month, day))
-}
-
 function pad2(value) {
   var n = Number(value)
   return (n < 10 ? "0" : "") + n
-}
-
-// Stable "yyyy-MM-dd" identity for a day, so a grid cell can be compared
-// against today without dragging Date objects through bindings.
-function dateKey(year, month, day) {
-  return year + "-" + pad2(Number(month) + 1) + "-" + pad2(day)
-}
-
-function keyForDate(date) {
-  return dateKey(date.getFullYear(), date.getMonth(), date.getDate())
-}
-
-function coerceWeekStart(value) {
-  if (value === undefined || value === null) return null
-  if (typeof value === "number")
-    return isFinite(value) ? ((Math.round(value) % 7) + 7) % 7 : null
-
-  var text = String(value).replace(/^\s+|\s+$/g, "").toLowerCase()
-  if (text === "") return null
-
-  for (var i = 0; i < WEEKDAY_NAMES.length; i++)
-    if (WEEKDAY_NAMES[i] === text || WEEKDAY_NAMES[i].substr(0, 3) === text) return i
-
-  var parsed = parseInt(text, 10)
-  return isFinite(parsed) ? ((parsed % 7) + 7) % 7 : null
-}
-
-// Configured week start, falling back to the locale's own first day when
-// the setting is missing or nonsense.
-function normalizedWeekStart(value, fallback) {
-  var configured = coerceWeekStart(value)
-  if (configured !== null) return configured
-  var fallbackStart = coerceWeekStart(fallback)
-  return fallbackStart === null ? 1 : fallbackStart
-}
-
-function weekStartSettingName(index) {
-  return WEEKDAY_NAMES[normalizedWeekStart(index, 1)]
-}
-
-// The toggle flips between the two conventions people actually switch
-// between. A calendar configured to any other start (Saturday, say) is
-// shown as-is and lands on Monday the first time it is toggled.
-function toggledWeekStart(index) {
-  return normalizedWeekStart(index, 1) === 1 ? 0 : 1
-}
-
-function weekdayOrder(weekStart) {
-  var start = normalizedWeekStart(weekStart, 1)
-  var out = []
-  for (var i = 0; i < 7; i++) out.push((start + i) % 7)
-  return out
 }
 
 // ISO-8601 week number: the week owning the Thursday of that date's
@@ -151,158 +97,119 @@ function isoWeek(year, month, day) {
   return Math.ceil(((date.getTime() - yearStart.getTime()) / MS_PER_DAY + 1) / 7)
 }
 
-function dayOfYear(year, month, day) {
-  return Math.round((Date.UTC(year, month, day) - Date.UTC(year, 0, 1)) / MS_PER_DAY) + 1
+// Two-digit ISO week, substituted into a format's 'ww' token before Qt
+// formats it -- Qt has no ISO week specifier of its own.
+function isoWeekLiteral(year, month, day) {
+  return pad2(isoWeek(year, month, day))
 }
 
-function daysInYear(year) {
-  return dayOfYear(year, 11, 31)
-}
+// ---- World clock. Quickshell's QML JS engine has no Intl (confirmed: `new
+//      Intl.DateTimeFormat(...)` throws ReferenceError), so an arbitrary
+//      IANA zone's current UTC offset can't be computed in pure JS. Offsets
+//      come from timezone-offsets.sh (reads the system's real zoneinfo db,
+//      so it's DST-correct); everything below just applies a cached offset
+//      to the already-ticking `today` Date.
 
-// Share of the year already behind you: whole days completed over days in
-// the year, so January 1 reads 0% and December 31 reads 100%.
-function yearProgress(year, month, day) {
-  var total = daysInYear(year)
-  if (total <= 0) return 0
-  return Math.max(0, Math.min(1, (dayOfYear(year, month, day) - 1) / total))
-}
-
-function yearProgressPercent(year, month, day) {
-  return Math.round(yearProgress(year, month, day) * 100)
-}
-
-// Memento mori. The default span is a round number rather than anything from
-// an actuarial table: the point of the bar is the reminder, not the
-// arithmetic, and whoever wants a different number can say so.
-var DEFAULT_LIFE_EXPECTANCY = 90
-
-// A birth year rather than an age, so the bar keeps counting on its own
-// instead of going stale the moment it is entered. 0 means "not set", which
-// is also what a blank, malformed, future, or implausibly distant year means.
-function parseBirthYear(value, currentYear) {
-  var now = Math.round(Number(currentYear))
-  if (!isFinite(now)) return 0
-  var text = String(value === undefined || value === null ? "" : value).replace(/^\s+|\s+$/g, "")
-  if (!/^\d{4}$/.test(text)) return 0
-  var year = parseInt(text, 10)
-  if (!isFinite(year) || year > now || year < now - 120) return 0
-  return year
-}
-
-// Whole years, the way people say their age: born in 1979 makes you 47 for
-// all of 2026, whichever side of your birthday today falls.
-function ageFromBirthYear(birthYear, currentYear) {
-  var born = parseBirthYear(birthYear, currentYear)
-  if (born <= 0) return 0
-  return Math.round(Number(currentYear)) - born
-}
-
-// 0 means "not set", which is also what a blank, negative, fractional, or
-// absurd entry means — the life bar simply stays hidden.
-function parseAge(value) {
-  var text = String(value === undefined || value === null ? "" : value).replace(/^\s+|\s+$/g, "")
-  if (!/^\d+$/.test(text)) return 0
-  var years = parseInt(text, 10)
-  if (!isFinite(years) || years <= 0 || years > 120) return 0
-  return years
-}
-
-// Unset or nonsense falls back to the default rather than to zero, so the
-// bar always has something to measure against.
-function parseLifeExpectancy(value) {
-  var text = String(value === undefined || value === null ? "" : value).replace(/^\s+|\s+$/g, "")
-  if (!/^\d+$/.test(text)) return DEFAULT_LIFE_EXPECTANCY
-  var years = parseInt(text, 10)
-  if (!isFinite(years) || years <= 0 || years > 150) return DEFAULT_LIFE_EXPECTANCY
-  return years
-}
-
-function lifeProgress(age, expectancy) {
-  var years = parseAge(age)
-  var span = parseLifeExpectancy(expectancy)
-  if (years <= 0 || span <= 0) return 0
-  return Math.max(0, Math.min(1, years / span))
-}
-
-function lifeProgressPercent(age, expectancy) {
-  return Math.round(lifeProgress(age, expectancy) * 100)
-}
-
-// Always six rows of seven days. A fixed grid keeps the popup exactly the
-// same height in every month, so stepping through the year never makes the
-// panel jump under the pointer.
-function monthGrid(year, month, weekStart, todayKey) {
-  var start = normalizedWeekStart(weekStart, 1)
-  var leading = (new Date(year, month, 1).getDay() - start + 7) % 7
-  var cursor = new Date(year, month, 1 - leading)
-  var today = String(todayKey || "")
-  var weeks = []
-
-  for (var w = 0; w < 6; w++) {
-    var days = []
-    var thursday = null
-    for (var d = 0; d < 7; d++) {
-      var cellYear = cursor.getFullYear()
-      var cellMonth = cursor.getMonth()
-      var cellDay = cursor.getDate()
-      var weekday = cursor.getDay()
-      var key = dateKey(cellYear, cellMonth, cellDay)
-      if (weekday === 4) thursday = { year: cellYear, month: cellMonth, day: cellDay }
-      days.push({
-        key: key,
-        year: cellYear,
-        month: cellMonth,
-        day: cellDay,
-        weekday: weekday,
-        inMonth: cellMonth === month && cellYear === year,
-        weekend: weekday === 0 || weekday === 6,
-        today: key === today
-      })
-      cursor.setDate(cursor.getDate() + 1)
-    }
-    // Number every row by the ISO week owning its Thursday. That is the
-    // definition itself for Monday-start weeks, and the only answer that
-    // stays stable for the other starts, where a row straddles two ISO
-    // weeks but shares all of Monday through Thursday with one of them.
-    var anchor = thursday || days[0]
-    weeks.push({
-      week: isoWeek(anchor.year, anchor.month, anchor.day),
-      days: days
-    })
+function parseTimezonesSetting(value) {
+  if (!Array.isArray(value)) return []
+  var out = []
+  for (var i = 0; i < value.length; i++) {
+    var entry = value[i]
+    if (!entry || typeof entry !== "object") continue
+    var zone = String(entry.zone || "")
+    if (zone === "") continue
+    out.push({ zone: zone, label: String(entry.label || zoneDisplayLabel(zone)) })
   }
-  return weeks
+  return out
 }
 
-function stepMonth(year, month, delta) {
-  var target = new Date(year, Number(month) + Number(delta), 1)
-  return { year: target.getFullYear(), month: target.getMonth() }
+// One JSON object per line (see timezone-offsets.sh) -> {zone: {offsetMinutes, abbr, error}}.
+function parseOffsetsOutput(text) {
+  var out = {}
+  var lines = String(text || "").split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim()
+    if (line === "") continue
+    try {
+      var parsed = JSON.parse(line)
+      if (parsed && parsed.zone) out[parsed.zone] = parsed
+    } catch (e) {
+      // Ignore a malformed line rather than losing the whole batch.
+    }
+  }
+  return out
+}
+
+// The standard trick for formatting a foreign zone without a real timezone
+// database in JS: shift the absolute timestamp by the zone's UTC offset,
+// then read the result with *UTC* getters. Reading local getters here would
+// re-apply the system's own offset on top and double-shift the result.
+function zoneShiftedDate(nowMs, offsetMinutes) {
+  return new Date(nowMs + offsetMinutes * 60000)
+}
+
+function formatZoneTime(nowMs, offsetMinutes, use24h) {
+  var d = zoneShiftedDate(nowMs, offsetMinutes)
+  var hours = d.getUTCHours()
+  var minutes = pad2(d.getUTCMinutes())
+  if (use24h) return pad2(hours) + ":" + minutes
+  var period = hours >= 12 ? "PM" : "AM"
+  var h12 = hours % 12
+  if (h12 === 0) h12 = 12
+  return h12 + ":" + minutes + " " + period
+}
+
+// "" for today in that zone, else "Yesterday"/"Tomorrow" — the local day is
+// derived the same shifted-then-UTC-read way, using the system's own
+// getTimezoneOffset() (JS's one built-in zone-aware value: minutes *west*
+// of UTC, positive for zones behind UTC — the opposite sign convention from
+// the offsetMinutes this file otherwise uses, hence the negation below).
+function formatZoneDayDelta(nowMs, offsetMinutes, localOffsetMinutesWestOfUtc) {
+  var zoneDate = zoneShiftedDate(nowMs, offsetMinutes)
+  var localDate = zoneShiftedDate(nowMs, -localOffsetMinutesWestOfUtc)
+  var zoneDay = Date.UTC(zoneDate.getUTCFullYear(), zoneDate.getUTCMonth(), zoneDate.getUTCDate())
+  var localDay = Date.UTC(localDate.getUTCFullYear(), localDate.getUTCMonth(), localDate.getUTCDate())
+  var deltaDays = Math.round((zoneDay - localDay) / MS_PER_DAY)
+  if (deltaDays === 0) return ""
+  if (deltaDays === 1) return "Tomorrow"
+  if (deltaDays === -1) return "Yesterday"
+  return deltaDays > 0 ? ("+" + deltaDays + "d") : (deltaDays + "d")
+}
+
+// "America/New_York" -> "New York". Best-effort default label when a zone
+// is first added; the user can still rename it.
+function zoneDisplayLabel(zoneName) {
+  var parts = String(zoneName || "").split("/")
+  var last = parts[parts.length - 1] || zoneName
+  return last.replace(/_/g, " ")
+}
+
+function filterZoneNames(allZones, query) {
+  var list = Array.isArray(allZones) ? allZones : []
+  var q = String(query || "").trim().toLowerCase()
+  if (q === "") return list.slice(0, 40)
+  var out = []
+  for (var i = 0; i < list.length && out.length < 40; i++) {
+    var zone = list[i]
+    if (zone.toLowerCase().indexOf(q) !== -1) out.push(zone)
+  }
+  return out
 }
 
 if (typeof module !== "undefined") {
   module.exports = {
-    dateKey: dateKey,
-    keyForDate: keyForDate,
-    normalizedWeekStart: normalizedWeekStart,
-    weekStartSettingName: weekStartSettingName,
-    toggledWeekStart: toggledWeekStart,
-    weekdayOrder: weekdayOrder,
     isoWeek: isoWeek,
-    dayOfYear: dayOfYear,
-    daysInYear: daysInYear,
-    yearProgress: yearProgress,
-    yearProgressPercent: yearProgressPercent,
-    parseAge: parseAge,
-    parseBirthYear: parseBirthYear,
-    ageFromBirthYear: ageFromBirthYear,
-    parseLifeExpectancy: parseLifeExpectancy,
-    lifeProgress: lifeProgress,
-    lifeProgressPercent: lifeProgressPercent,
-    monthGrid: monthGrid,
-    stepMonth: stepMonth,
+    isoWeekLiteral: isoWeekLiteral,
     clockFormats: clockFormats,
     clockNeedsSeconds: clockNeedsSeconds,
+    clockUses24Hour: clockUses24Hour,
     clockFormatRing: clockFormatRing,
     nextClockFormat: nextClockFormat,
-    isoWeekLiteral: isoWeekLiteral
+    parseTimezonesSetting: parseTimezonesSetting,
+    parseOffsetsOutput: parseOffsetsOutput,
+    formatZoneTime: formatZoneTime,
+    formatZoneDayDelta: formatZoneDayDelta,
+    zoneDisplayLabel: zoneDisplayLabel,
+    filterZoneNames: filterZoneNames
   }
 }

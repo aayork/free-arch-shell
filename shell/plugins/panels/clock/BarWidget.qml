@@ -5,11 +5,10 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Date/time label for the bar, and the host for the calendar popup.
+// Date/time label for the bar, and the host for the world-clock popup.
 //
-// Left click reveals the calendar — asking "what is the date?" is what a
-// click on a clock means — right click walks the common label formats, and
-// middle click opens the timezone picker.
+// Left click opens the popup — asking "what time is it?" is what a click on
+// a clock means — right click walks the common label formats.
 BarWidget {
   id: root
   moduleName: "roseshell.clock"
@@ -77,10 +76,6 @@ BarWidget {
     if (panelLoader.item) panelLoader.item.toggle()
   }
 
-  function toggleWeekStart() {
-    if (panelLoader.item) panelLoader.item.toggleWeekStart()
-  }
-
   // The clock fills more slot than it paints a mark for, at both
   // orientations: horizontally it is a text label in a padded slot, so the
   // dot takes the label width; vertically it is a stack of icon-sized lines,
@@ -135,7 +130,6 @@ BarWidget {
 
     function refresh(): void { root.broadcast("refresh") }
     function cycleFormat(): void { root.cycleFormat() }
-    function toggleWeekStart(): void { root.toggleWeekStart() }
     function open(): void { root.open() }
     function close(): void { root.close() }
     function show(): void { root.open() }
@@ -157,7 +151,6 @@ BarWidget {
 
     onPressed: function(b) {
       if (b === Qt.RightButton) root.cycleFormat()
-      else if (b === Qt.MiddleButton) { if (root.bar) root.bar.run("roseshell-menu-timezone") }
       else root.togglePanel()
     }
 
