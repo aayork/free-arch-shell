@@ -21,6 +21,11 @@ QtObject {
   property color accent: "#cacccc"
   property color urgent: "#a55555"
   property color muted: "#707880"
+  // Named palette colors for status indicators (every bundled theme defines them).
+  property color red: "#a55555"
+  property color orange: "#c7875a"
+  property color yellow: "#c9b25a"
+  property color green: "#6fa66a"
 
   // Flat dictionary of "section.key" -> raw string from shell.toml.
   // Reassigning this whole property is what makes surface bindings below
@@ -156,7 +161,10 @@ QtObject {
       else if (match[1] === "color4") color4Value = match[2]
       else if (match[1] === "color7") color7Value = match[2]
       else if (match[1] === "color8") color8Value = match[2]
-      else if (match[1] === "red" || match[1] === "color1") urgent = match[2]
+      else if (match[1] === "red" || match[1] === "color1") { urgent = match[2]; if (match[1] === "red") red = match[2] }
+      else if (match[1] === "orange") orange = match[2]
+      else if (match[1] === "yellow") yellow = match[2]
+      else if (match[1] === "green") green = match[2]
     }
     if (!loadedBackground && color0Value.length > 0) background = color0Value
     if (!loadedForeground && color7Value.length > 0) foreground = color7Value

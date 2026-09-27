@@ -8,7 +8,10 @@ flat JSON cache the shell's Calendar plugin reads. Account metadata lives in
 stored via secret-tool (gnome-keyring), never written to disk in the clear.
 
 Invoked by shell/plugins/panels/calendar/Service.qml as:
-  python3 calendar.py <subcommand> [args...]
+  python3 calendar_helper.py <subcommand> [args...]
+Not named calendar.py on purpose: this directory is sys.path[0] when run, so
+that name would shadow the stdlib calendar module (http.cookiejar imports it)
+and break requests, which caldav then reports as "no HTTP library installed".
 Every subcommand prints one JSON object to stdout and exits non-zero on
 failure so the QML side can branch on Process.onExited without scraping text.
 """
@@ -364,7 +367,7 @@ def cmd_delete_event(args):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(prog="calendar.py")
+    parser = argparse.ArgumentParser(prog="calendar_helper.py")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("add-icloud")

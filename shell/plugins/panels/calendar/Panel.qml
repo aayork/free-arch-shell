@@ -27,24 +27,46 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color barIconColor: calendar.events.length > 0 ? barForeground : Qt.darker(barForeground, 1.55)
 
-  readonly property date today: new Date()
+  // Ticks so "today", the next event, and the status dot track the clock
+  // instead of freezing at whenever the widget was created.
+  property date now: new Date()
+  Timer {
+    interval: 30000
+    running: true
+    repeat: true
+    onTriggered: root.now = new Date()
+  }
+
+  readonly property date today: now
   readonly property string todayKey: Qt.formatDate(today, "yyyy-MM-dd")
   readonly property var todaysEvents: Model.eventsForDateKey(calendar.events, todayKey)
-  readonly property var nextEvent: Model.nextUpcomingEvent(todaysEvents, today.toISOString())
-  readonly property string barLabel: {
-    if (calendar.syncing && calendar.events.length === 0) return "…"
-    if (nextEvent) return eventTimeLabel(nextEvent) + " " + nextEvent.title
-    if (todaysEvents.length > 0) return todaysEvents.length + " today"
-    return ""
-  }
 
-  function eventTimeLabel(ev) {
-    if (!ev) return ""
-    if (ev.allDay) return "All day"
-    var d = new Date(ev.start)
-    return isNaN(d.getTime()) ? "" : Qt.formatTime(d, "h:mm AP")
+  // Dot color from the nearest timed event that hasn't ended: red when it's
+  // on now or starts within 15 min, orange within the hour, yellow later
+  // today; green once every timed event today is over. All-day-only days
+  // count as "later today".
+  readonly property color statusDotColor: {
+    var nowMs = now.getTime()
+    var soonest = -1
+    var anyTimed = false
+    for (var i = 0; i < todaysEvents.length; i++) {
+      var ev = todaysEvents[i]
+      if (ev.allDay) continue
+      anyTimed = true
+      var start = new Date(ev.start).getTime()
+      var end = new Date(ev.end).getTime()
+      if (isNaN(start)) continue
+      if (!isNaN(end) && end <= nowMs) continue
+      var untilStart = Math.max(0, start - nowMs)
+      if (soonest < 0 || untilStart < soonest) soonest = untilStart
+    }
+    if (soonest >= 0) {
+      if (soonest <= 15 * 60000) return Color.red
+      if (soonest <= 60 * 60000) return Color.orange
+      return Color.yellow
+    }
+    return anyTimed ? Color.green : Color.yellow
   }
-
   function eventRangeLabel(ev) {
     if (!ev) return ""
     if (ev.allDay) return "All day"
@@ -89,7 +111,7 @@ Panel {
   }
 
   // No per-account enable/disable toggle yet — the backend only supports
-  // add/remove (see calendar.py), and removing is already one click on the
+  // add/remove (see calendar_helper.py), and removing is already one click on the
   // row's × button, so Enter-to-activate has nothing to do here for now.
 
   implicitWidth: button.implicitWidth
@@ -130,11 +152,26 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.barLabel !== "" ? "  " + root.barLabel : ""
+    // Icon only: the fixed icon slot can't fit a label, and any text here
+    // shoves the glyph off-center. Today's status is the dot below.
+    text: ""
     onPressed: function(b) {
       if (b === Qt.MiddleButton) calendar.sync()
       else root.toggle()
     }
+  }
+
+  // Small dot at the icon's top-right while anything is on today's calendar,
+  // colored by statusDotColor.
+  Rectangle {
+    readonly property real size: Style.spaceReal(5)
+    visible: root.todaysEvents.length > 0
+    width: size
+    height: size
+    radius: size / 2
+    x: button.width / 2 + Style.bar.iconCanvas / 2 - size * 0.6
+    y: button.height / 2 - Style.bar.iconCanvas / 2 - size * 0.4
+    color: root.statusDotColor
   }
 
   KeyboardPanel {

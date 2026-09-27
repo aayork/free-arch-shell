@@ -7,14 +7,14 @@ import "Model.js" as Model
 // Long-lived state for the Calendar plugin, modeled on the Dropbox/Tailscale
 // Service.qml shape: own the poll timer and every Process, expose plain
 // properties the bar widget and panel both read. All actual CalDAV/ICS work
-// happens in the co-located calendar.py helper (Process + JSON on stdout),
+// happens in the co-located calendar_helper.py helper (Process + JSON on stdout),
 // never inline here — this file only orchestrates and parses.
 Item {
   id: root
 
   property var settings: ({})
   property string roseshellPath: Quickshell.env("ROSESHELL_PATH")
-  readonly property string helperPath: (roseshellPath || "") + "/shell/plugins/panels/calendar/calendar.py"
+  readonly property string helperPath: (roseshellPath || "") + "/shell/plugins/panels/calendar/calendar_helper.py"
 
   property var accounts: []
   property var events: []
@@ -46,7 +46,7 @@ Item {
   }
 
   function sync() {
-    if (syncProcess.running || helperPath === "/shell/plugins/panels/calendar/calendar.py") return
+    if (syncProcess.running || helperPath === "/shell/plugins/panels/calendar/calendar_helper.py") return
     syncing = true
     syncProcess.command = ["python3", helperPath, "sync"]
     syncProcess.running = true
