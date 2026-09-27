@@ -145,7 +145,7 @@ BarWidget {
     labelVisible: !root.vertical
     hasVisualContent: root.vertical ? root.verticalLines.length > 0 : text !== ""
     fixedHeight: root.vertical ? root.verticalLines.length * Style.bar.iconSlot : -1
-    horizontalMargin: 8.75
+    horizontalMargin: 3  // tight so the calendar icon beside it doesn't look detached
     verticalPadding: 8.75
     tooltipText: "Right-click to toggle format"
 
