@@ -26,11 +26,21 @@ Item {
   readonly property bool idleEnabled: stayAwakeStateLoaded && !stayAwake
   readonly property string screensaverClass: "org.roseshell.screensaver"
 
+  // Browsers ask for their "keep awake" lock over D-Bus/portal, which nothing
+  // on this session honors, so the Wayland IdleMonitor never sees it. Before
+  // idling, check for playing media or a fullscreen window (video, games) on a
+  // visible workspace ourselves.
+  readonly property string inhibitCheckCommand: "playerctl -a status 2>/dev/null | grep -qx Playing && { echo media; exit; }; "
+    + "active=$(hyprctl -j monitors 2>/dev/null | jq -c '[.[].activeWorkspace.id]'); "
+    + "hyprctl -j clients 2>/dev/null | jq -e --argjson active \"${active:-[]}\" "
+    + "'any(.[]; .fullscreen > 0 and .class != \"" + screensaverClass + "\" and (.workspace.id as $w | $active | index($w)))' >/dev/null && echo fullscreen"
+
   property bool stayAwake: false
   property bool stayAwakeStateLoaded: false
   property bool hasPendingStayAwakePersist: false
   property bool pendingStayAwakePersist: false
   property bool idledThisCycle: false
+  property string inhibitReason: ""
   property bool screensaverStartedThisCycle: false
   property string lastEvent: "starting"
   property string lastEventAt: ""
@@ -174,8 +184,35 @@ Item {
     logEvent("idle-monitor", idleMonitor.isIdle ? "idle" : "active")
     if (!root.idleEnabled) return
 
-    if (idleMonitor.isIdle) startIdleCycle()
-    else handleActiveSignal()
+    if (idleMonitor.isIdle) checkInhibitorsThenIdle()
+    else {
+      inhibitRecheckTimer.stop()
+      root.inhibitReason = ""
+      handleActiveSignal()
+    }
+  }
+
+  function checkInhibitorsThenIdle() {
+    if (root.idledThisCycle || inhibitCheckProcess.running) return
+    inhibitCheckProcess.reason = ""
+    inhibitCheckProcess.command = ["bash", "-c", root.inhibitCheckCommand]
+    inhibitCheckProcess.running = true
+  }
+
+  function handleInhibitCheck(reason) {
+    if (!root.idleEnabled || !idleMonitor.isIdle || root.idledThisCycle) return
+
+    if (reason !== "") {
+      if (root.inhibitReason !== reason) logEvent("idle-inhibited", reason)
+      root.inhibitReason = reason
+      // Re-check after another full idle timeout, so the screensaver still
+      // waits the configured time once the video or game stops.
+      inhibitRecheckTimer.restart()
+      return
+    }
+
+    root.inhibitReason = ""
+    startIdleCycle()
   }
 
   function statusJson() {
@@ -185,6 +222,7 @@ Item {
       stayAwakeStateLoaded: root.stayAwakeStateLoaded,
       stayAwakeStatePath: root.stayAwakeStatePath,
       idle: idleMonitor.isIdle,
+      inhibitedBy: root.inhibitReason,
       inIdleCycle: root.idledThisCycle,
       screensaverStarted: root.screensaverStartedThisCycle,
       screensaver: root.screensaverTimeoutSeconds,
@@ -238,7 +276,11 @@ Item {
     if (!changed) return enabled ? "disabled" : "enabled"
 
     logEvent("stay-awake", (enabled ? "enabled" : "disabled") + (reason ? " " + reason : ""))
-    if (enabled) cancelIdleCycle("stay-awake")
+    if (enabled) {
+      inhibitRecheckTimer.stop()
+      root.inhibitReason = ""
+      cancelIdleCycle("stay-awake")
+    }
     else Qt.callLater(root.handleIdleChanged)
 
     return enabled ? "disabled" : "enabled"
@@ -254,6 +296,13 @@ Item {
     timeout: root.firstIdleTimeoutSeconds
     respectInhibitors: true
     onIsIdleChanged: root.handleIdleChanged()
+  }
+
+  Timer {
+    id: inhibitRecheckTimer
+    interval: Math.max(1, root.firstIdleTimeoutSeconds) * 1000
+    repeat: false
+    onTriggered: if (root.idleEnabled && idleMonitor.isIdle) root.checkInhibitorsThenIdle()
   }
 
   Timer {
@@ -284,6 +333,15 @@ Item {
   Connections {
     target: Hyprland
     function onRawEvent(event) { root.handleHyprlandEvent(event) }
+  }
+
+  Process {
+    id: inhibitCheckProcess
+    property string reason: ""
+    stdout: SplitParser {
+      onRead: function(line) { inhibitCheckProcess.reason = String(line).trim() }
+    }
+    onExited: function() { root.handleInhibitCheck(inhibitCheckProcess.reason) }
   }
 
   Process {
