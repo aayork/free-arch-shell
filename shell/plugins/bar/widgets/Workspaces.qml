@@ -68,7 +68,12 @@ BarWidget {
         // theme (Matte Black) it's #333 against a #121212 background,
         // nearly invisible as text. An empty workspace is left at the
         // widget's own default (unchanged).
-        foreground: focused ? Color.accent : (occupied ? Util.alpha(Color.accent, 0.5) : (root.bar ? root.bar.barForeground : Color.foreground))
+        // On a transparent bar the accent sits on the wallpaper and clashes,
+        // so everything follows the wallpaper-contrast barForeground instead;
+        // the focused glyph and the empty-workspace opacity still tell them apart.
+        foreground: (root.bar && root.bar.transparent)
+          ? root.bar.barForeground
+          : (focused ? Color.accent : (occupied ? Util.alpha(Color.accent, 0.5) : (root.bar ? root.bar.barForeground : Color.foreground)))
         horizontalMargin: 6
         verticalPadding: 6
         fixedWidth: root.vertical ? root.barSize : Style.space(20)
