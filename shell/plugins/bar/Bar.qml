@@ -1263,23 +1263,96 @@ Item {
 
     implicitWidth: root.vertical ? root.barSize : 0
     implicitHeight: root.vertical ? 0 : root.barSize
-    color: root.transparent ? "transparent" : root.background
+    color: barWindow.autoHide || root.transparent ? "transparent" : root.background
     surfaceFormat.opaque: false
     WlrLayershell.namespace: "roseshell-bar"
-    WlrLayershell.layer: WlrLayer.Top
+    // Above a fullscreen window only while one covers this monitor; a Top
+    // layer bar is drawn underneath it, which is what hid it before.
+    WlrLayershell.layer: barWindow.autoHide ? WlrLayer.Overlay : WlrLayer.Top
 
-    Loader {
-      anchors.fill: parent
-      sourceComponent: root.vertical ? verticalBar : horizontalBar
+    // macOS-style fullscreen: while a fullscreen window covers this monitor the
+    // bar tucks away past its edge, and touching that edge slides it back in
+    // for a quick look. The surface itself never moves (a margin change per
+    // frame would re-configure the layer surface on every step); the content
+    // slides inside it, and the input mask shrinks to a thin strip at the edge
+    // so the hidden bar does not swallow clicks meant for the fullscreen app.
+    readonly property var hyprlandMonitor: Hyprland.monitorFor(barWindow.screen)
+    readonly property var visibleWorkspace: hyprlandMonitor ? hyprlandMonitor.activeWorkspace : null
+    readonly property bool fullscreenHere: visibleWorkspace ? visibleWorkspace.hasFullscreen === true : false
+    // A bar switched off with roseshell-toggle-bar stays off, fullscreen or not.
+    readonly property bool autoHide: fullscreenHere && !root.barHidden
+    property bool peeking: false
+    readonly property bool tucked: autoHide && !peeking
+    // What keeps a peek open: the pointer on the bar or on the edge strip, or a
+    // popout the bar opened (the pointer is inside it, below the bar).
+    readonly property bool peekHeld: slideHover.hovered || edgeHover.hovered || root.activePopout !== null
+    readonly property int edgeSize: 2
 
-      // A child of the loader, not a sibling of the sections: an ancestor stays
-      // hovered while the pointer is over a widget, where a sibling would lose
-      // hover to the section the pointer entered.
+    onAutoHideChanged: if (!autoHide) peeking = false
+    onPeekHeldChanged: {
+      if (peekHeld) peekHideTimer.stop()
+      else if (peeking) peekHideTimer.restart()
+    }
+
+    Timer {
+      id: peekHideTimer
+      interval: 400
+      onTriggered: if (!barWindow.peekHeld) barWindow.peeking = false
+    }
+
+    mask: barWindow.tucked ? edgeRegion : null
+    property Region edgeRegion: Region { item: edgeStrip }
+
+    Item {
+      id: edgeStrip
+      x: root.position === "right" ? parent.width - barWindow.edgeSize : 0
+      y: root.position === "bottom" ? parent.height - barWindow.edgeSize : 0
+      width: root.vertical ? barWindow.edgeSize : parent.width
+      height: root.vertical ? parent.height : barWindow.edgeSize
+
       HoverHandler {
-        onHoveredChanged: root.setBarHovered(hovered)
-        // Unplugging a monitor destroys its bar without a leave event, which
-        // would strand this surface's tally and hold the peek open for good.
-        Component.onDestruction: if (hovered) root.setBarHovered(false)
+        id: edgeHover
+        enabled: barWindow.autoHide
+        onHoveredChanged: if (hovered) barWindow.peeking = true
+      }
+    }
+
+    Item {
+      id: slide
+      width: parent.width
+      height: parent.height
+      // Parked one bar-width past the edge it hangs from.
+      x: !barWindow.tucked || !root.vertical ? 0
+        : (root.position === "right" ? width : -width)
+      y: !barWindow.tucked || root.vertical ? 0
+        : (root.position === "bottom" ? height : -height)
+
+      Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+      Behavior on y { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+
+      HoverHandler { id: slideHover; enabled: barWindow.autoHide }
+
+      // Over a fullscreen window the bar is always solid, so a transparent
+      // bar's text does not land on top of whatever is playing.
+      Rectangle {
+        anchors.fill: parent
+        visible: barWindow.autoHide
+        color: root.background
+      }
+
+      Loader {
+        anchors.fill: parent
+        sourceComponent: root.vertical ? verticalBar : horizontalBar
+
+        // A child of the loader, not a sibling of the sections: an ancestor stays
+        // hovered while the pointer is over a widget, where a sibling would lose
+        // hover to the section the pointer entered.
+        HoverHandler {
+          onHoveredChanged: root.setBarHovered(hovered)
+          // Unplugging a monitor destroys its bar without a leave event, which
+          // would strand this surface's tally and hold the peek open for good.
+          Component.onDestruction: if (hovered) root.setBarHovered(false)
+        }
       }
     }
 
