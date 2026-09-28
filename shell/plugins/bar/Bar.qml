@@ -52,7 +52,17 @@ Item {
   property string centerAnchor: ""
   property bool requestedTransparent: false
   property bool useTransparentForeground: false
-  property bool transparent: false
+  // What the transparency setting has resolved to (set once the wallpaper
+  // contrast foreground is known). `transparent` is what everything reads.
+  property bool transparentApplied: false
+  // Bars currently tucked over a fullscreen window. Over a fullscreen app the
+  // bar is always drawn solid with theme colours: no see-through background,
+  // no wallpaper-contrast text, no transparent-only widget styling. Widgets
+  // share this one bar object, so the switch is bar-wide rather than per
+  // monitor.
+  property int fullscreenBarCount: 0
+  readonly property bool fullscreenSolid: fullscreenBarCount > 0
+  readonly property bool transparent: transparentApplied && !fullscreenSolid
   property bool centerSectionHovered: false
   // One bar surface exists per monitor and each reports into this count, so a
   // pointer crossing from one monitor's bar to another's stays counted however
@@ -75,7 +85,7 @@ Item {
   property color themeContrastForeground: Color.background
   property color transparentForeground: Color.bar.text
   property color foreground: themeForeground
-  property color barForeground: useTransparentForeground ? transparentForeground : themeForeground
+  property color barForeground: useTransparentForeground && !fullscreenSolid ? transparentForeground : themeForeground
   property bool foregroundAnimationEnabled: true
   property color background: Color.bar.background
   property color urgent: Color.bar.active
@@ -1035,7 +1045,7 @@ Item {
     if (!nextTransparent) {
       foregroundAnimationEnabled = false
       useTransparentForeground = false
-      transparent = false
+      transparentApplied = false
       transparentForeground = themeForeground
       restoreForegroundAnimation()
       return
@@ -1093,7 +1103,7 @@ Item {
         root.transparentForeground = value
         if (root.requestedTransparent) {
           root.useTransparentForeground = true
-          root.transparent = true
+          root.transparentApplied = true
         }
         root.restoreForegroundAnimation()
       }
@@ -1288,7 +1298,14 @@ Item {
     readonly property bool peekHeld: slideHover.hovered || edgeHover.hovered || root.activePopout !== null
     readonly property int edgeSize: 2
 
-    onAutoHideChanged: if (!autoHide) peeking = false
+    onAutoHideChanged: {
+      root.fullscreenBarCount = Math.max(0, root.fullscreenBarCount + (autoHide ? 1 : -1))
+      if (!autoHide) peeking = false
+    }
+    // A monitor unplugged mid-fullscreen destroys its bar without the change
+    // above, which would leave every other bar stuck solid.
+    Component.onCompleted: if (autoHide) root.fullscreenBarCount += 1
+    Component.onDestruction: if (autoHide) root.fullscreenBarCount = Math.max(0, root.fullscreenBarCount - 1)
     onPeekHeldChanged: {
       if (peekHeld) peekHideTimer.stop()
       else if (peeking) peekHideTimer.restart()
@@ -1332,8 +1349,7 @@ Item {
 
       HoverHandler { id: slideHover; enabled: barWindow.autoHide }
 
-      // Over a fullscreen window the bar is always solid, so a transparent
-      // bar's text does not land on top of whatever is playing.
+      // Drawn here rather than as the window colour so it slides with the bar.
       Rectangle {
         anchors.fill: parent
         visible: barWindow.autoHide
