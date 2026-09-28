@@ -1,79 +1,114 @@
-# Omarchy
+# Roseshell
 
-Omarchy is a beautiful, fun & agentic Linux distribution by DHH.
+Roseshell is a desktop shell for [Hyprland](https://hypr.land/), built on
+[Quickshell](https://quickshell.org/). It is a fork of the shell from
+[Omarchy](https://omarchy.org), DHH's Arch-based distribution, pulled out so it
+runs on an ordinary Arch (or CachyOS) Hyprland setup without the rest of the
+distribution.
 
-Read more at [omarchy.org](https://omarchy.org).
+One long-running Quickshell process hosts the whole desktop: the top bar, the
+lock screen, notifications, on-screen displays, the wallpaper, the idle
+screensaver, and the panels behind the bar's icons. Each of those is a plugin,
+and third-party plugins load from disk the same way.
 
-## The Omarchy Manual
+## What's in it
 
-The manual lives in [`manual/`](manual/), which is its authoritative source. It's
-mirrored to [learn.omacom.io](https://learn.omacom.io/2/the-omarchy-manual), where
-its screenshots are also hosted.
+- **Bar**: workspaces, clock with a world-clock popup, calendar, tray, audio,
+  Bluetooth, network, Tailscale and more. It can be solid or transparent, and
+  it hides over fullscreen apps: touch the top edge and it slides down, like
+  the macOS menu bar.
+- **Panels**: audio devices and volume, Wi-Fi (including a QR code to share
+  the network), Bluetooth, power, weather.
+- **Calendar**: iCloud CalDAV sync and ICS feed subscriptions.
+- **Lock screen and idle**: screensaver, then lock, then screen off. The
+  screensaver plays Apple aerial videos with mpv, and it holds off while media
+  is playing or a window is fullscreen.
+- **Theming**: 20+ themes in `themes/`, plus a Settings panel for theme, font,
+  cursor and icon theme. It can generate a theme from the wallpaper's colours,
+  and it passes theme colours on to apps such as Zen Browser and termusic.
+- **Notifications, clipboard history, emoji picker, reminders, polkit agent.**
+- **Plugins**: `roseshell-plugin add|enable|disable|remove|list` installs and
+  manages third-party plugins in `~/.config/roseshell/plugins/`. Plugins written
+  for Omarchy's shell generally work. The Omacast launcher is one of them, and
+  `bin/roseshell-vim-keys` adds a `vim:` search to it for your Neovim
+  keybindings and Vim's built-in commands.
 
-- [Welcome to Omarchy!](manual/01-welcome-to-omarchy.md)
+## How it differs from Omarchy
 
-**The Basics**
+- **No Omarchy install needed.** It runs on plain Hyprland with a Lua config.
+  It does not need UWSM: app launches fall back to `gtk-launch` when
+  `uwsm-app` is missing.
+- **Renamed throughout.** Commands, IPC targets, window classes and config
+  paths use `roseshell` (`roseshell-*` scripts, `~/.config/roseshell/`,
+  `ROSESHELL_PATH`).
+- **Only the shell.** The installer, package management, migrations and
+  bundled apps are left out.
+- **Fork-only features**: the aerial screensaver, the fullscreen bar peek, the
+  calendar plugin, the Settings panel and the wallpaper theme generator.
 
-- [Getting Started](manual/02-getting-started.md)
-- [Coming From Mac or Windows](manual/03-coming-from-mac-or-windows.md)
-- [Navigation](manual/04-navigation.md)
-- [The top bar](manual/05-the-top-bar.md)
-- [Themes](manual/06-themes.md)
-- [Hotkeys](manual/07-hotkeys.md)
-- [Unified Clipboard & History](manual/08-unified-clipboard-history.md)
-- [Reminders](manual/09-reminders.md)
-- [Notices](manual/10-notices.md)
-- [Text Extraction & Dictation](manual/11-text-extraction-dictation.md)
-- [Screenshots & Recording](manual/12-screenshots-recording.md)
-- [Toggles, idle & screensaver](manual/13-toggles-idle-screensaver.md)
-- [Omarchy CLI](manual/14-omarchy-cli.md)
+## Repository layout
 
-**The Applications**
+This repository keeps Omarchy's full history and tree so upstream fixes can
+still be merged in (`git fetch upstream && git merge upstream/quattro`).
+Roseshell is the part that runs:
 
-- [Terminal](manual/15-terminal.md)
-- [Neovim](manual/16-neovim.md)
-- [AI](manual/17-ai.md)
-- [Development Tools](manual/18-development-tools.md)
-- [Shell Tools](manual/19-shell-tools.md)
-- [Shell Functions](manual/20-shell-functions.md)
-- [TUIs](manual/21-tuis.md)
-- [GUIs](manual/22-guis.md)
-- [Browsers](manual/23-browsers.md)
-- [Commercial apps/services](manual/24-commercial-apps-services.md)
-- [Web Apps](manual/25-web-apps.md)
-- [Gaming](manual/26-gaming.md)
-- [Filling out PDFs](manual/27-filling-out-pdfs.md)
-- [Windows VM](manual/28-windows-vm.md)
-- [Other Packages](manual/29-other-packages.md)
+| Path | What it is |
+| --- | --- |
+| `shell/` | The Quickshell shell: `shell.qml`, services, and first-party plugins. See [`shell/README.md`](shell/README.md). |
+| `bin/roseshell-*` | The scripts the shell calls (network, audio, themes, idle, lock, ...). |
+| `config/`, `default/` | The default `shell.json`, the icon font, and the `vim:` Omacast extension. |
+| `themes/` | Theme packages: colours, wallpapers and per-app theme files. |
 
-**Configuration**
+Everything else (`install/`, `migrations/`, `manual/`, and the `bin/omarchy-*`
+scripts) is upstream Omarchy, kept for merging and not used by Roseshell.
+A sparse checkout of just the paths above is enough to run it:
 
-- [Updates](manual/30-updates.md)
-- [Dotfiles](manual/31-dotfiles.md)
-- [Shell plugins](manual/32-shell-plugins.md)
-- [Monitors](manual/33-monitors.md)
-- [Keyboard, Mouse, Trackpad](manual/34-keyboard-mouse-trackpad.md)
-- [Networking](manual/35-networking.md)
-- [System sleep](manual/36-system-sleep.md)
-- [Hardware authentication](manual/37-hardware-authentication.md)
-- [Fonts](manual/38-fonts.md)
-- [Backgrounds](manual/39-backgrounds.md)
-- [Prompt](manual/40-prompt.md)
-- [Branding](manual/41-branding.md)
-- [Common tweaks](manual/42-common-tweaks.md)
-- [Making your own theme](manual/43-making-your-own-theme.md)
+```sh
+git clone --filter=blob:none --sparse https://github.com/aayork/roseshell ~/projects/roseshell
+cd ~/projects/roseshell
+git sparse-checkout set /shell /bin /config /default /themes /README.md /LICENSE
+```
 
-**The Rest**
+## Running it
 
-- [Mac support](manual/44-mac-support.md)
-- [Troubleshooting](manual/45-troubleshooting.md)
-- [FAQ](manual/46-faq.md)
-- [System snapshots](manual/47-system-snapshots.md)
-- [Security](manual/48-security.md)
-- [Omarchy on...](manual/49-omarchy-on.md)
-- [Dual Boot Install](manual/50-dual-boot-install.md)
-- [Unattended Installs](manual/51-unattended-installs.md)
+You need Hyprland, Quickshell, and the tools the panels use: NetworkManager
+(`nmcli`), `bluetoothctl`, PipeWire (`wpctl`), `jq`, `qrencode`, `mpv`,
+`playerctl`, and a [Nerd Font](https://www.nerdfonts.com/).
 
-## License
+1. Put the scripts on your `PATH`, for example by symlinking
+   `bin/roseshell-*` into `~/.local/bin`.
+2. Tell the shell where it lives, and launch it from Hyprland's autostart. In
+   `hyprland.lua`:
 
-Omarchy is released under the [MIT License](https://opensource.org/licenses/MIT).
+   ```lua
+   local roseshellPath = os.getenv("HOME") .. "/projects/roseshell"
+
+   hl.env("ROSESHELL_PATH", roseshellPath)
+   hl.env("PATH", os.getenv("HOME") .. "/.local/bin:" .. (os.getenv("PATH") or "/usr/local/bin:/usr/bin"))
+
+   hl.on("hyprland.start", function()
+     hl.exec_cmd("systemctl --user import-environment ROSESHELL_PATH")
+     hl.exec_cmd(roseshellPath .. "/bin/roseshell-launch-shell")
+   end)
+   ```
+
+   Hyprland applies `hl.env` only when it starts, so log out and back in after
+   changing these lines.
+3. Configure the bar layout, idle timings and plugins in
+   `~/.config/roseshell/shell.json`. `config/roseshell/shell.json` is the
+   default to start from.
+
+`roseshell-restart-shell` restarts the shell, and `roseshell-shell` sends IPC
+calls to the running one:
+
+```sh
+roseshell-shell shell summon roseshell.network    # open the network panel
+roseshell-shell idle status
+```
+
+The shell logs to the journal: `journalctl --user -t roseshell-shell`.
+
+## Credits and license
+
+Roseshell is built on Omarchy by David Heinemeier Hansson and its contributors,
+and is released under the same [MIT license](LICENSE).
