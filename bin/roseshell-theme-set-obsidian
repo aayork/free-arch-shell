@@ -20,7 +20,7 @@ jq -r '.vaults | values[].path' ~/.config/obsidian/obsidian.json 2>/dev/null | w
   "minAppVersion": "0.16.0",
   "description": "Automatically syncs with your current Roseshell system theme colors and fonts",
   "author": "Roseshell",
-  "authorUrl": "https://github.com/aayork/free-arch-shell"
+  "authorUrl": "https://github.com/aayork/roseshell"
 }
 EOF
 
