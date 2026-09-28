@@ -1697,6 +1697,25 @@ ShellRoot {
       return JSON.stringify(shell.shellConfig || {})
     }
 
+    // Sets one value in shell.json by dotted path ("nightlight.schedule",
+    // "bar.glass.tint"), creating intermediate objects as needed. Used by the
+    // settings overlay for options that have no dedicated command of their own.
+    function setShellConfigValue(path: string, valueJson: string): string {
+      var keys = String(path || "").split(".").filter(function(k) { return k.length > 0 })
+      if (keys.length === 0) return "invalid path"
+      var value
+      try { value = JSON.parse(valueJson) } catch (e) { return "invalid json" }
+      shell.mutateShellConfig(function(config) {
+        var node = config
+        for (var i = 0; i < keys.length - 1; i++) {
+          if (!Util.isPlainObject(node[keys[i]])) node[keys[i]] = {}
+          node = node[keys[i]]
+        }
+        node[keys[keys.length - 1]] = value
+      })
+      return "ok"
+    }
+
     function debugBarGeometry(): string {
       return JSON.stringify(shell.bar && shell.bar.debugBarGeometry ? shell.bar.debugBarGeometry() : [])
     }

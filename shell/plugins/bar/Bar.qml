@@ -88,6 +88,9 @@ Item {
   property color barForeground: useTransparentForeground && !fullscreenSolid ? transparentForeground : themeForeground
   property bool foregroundAnimationEnabled: true
   property color background: Color.bar.background
+  // How much of the theme background a transparent bar keeps (bar.glass.tint
+  // in shell.json). 0 is fully clear; any blur comes from Hyprland behind it.
+  property real glassTint: 0
   property color urgent: Color.bar.active
 
   Behavior on barForeground { enabled: root.foregroundAnimationEnabled; ColorAnimation { duration: 420; easing.type: Easing.InOutCubic } }
@@ -593,6 +596,8 @@ Item {
 
     position = normalizePosition(config.position)
     setRequestedTransparency(config.transparent === true)
+    var glass = Util.isPlainObject(config.glass) ? config.glass : ({})
+    glassTint = Math.max(0, Math.min(1, Number(glass.tint) || 0))
     centerAnchor = Util.canonicalWidgetId(config.centerAnchor || "")
 
     // layoutEntries feeds plain JS arrays to the module Repeaters, and QML
@@ -1273,7 +1278,9 @@ Item {
 
     implicitWidth: root.vertical ? root.barSize : 0
     implicitHeight: root.vertical ? 0 : root.barSize
-    color: barWindow.autoHide || root.transparent ? "transparent" : root.background
+    color: barWindow.autoHide ? "transparent"
+      : root.transparent ? Util.alpha(root.background, root.glassTint)
+      : root.background
     surfaceFormat.opaque: false
     WlrLayershell.namespace: "roseshell-bar"
     // Above a fullscreen window only while one covers this monitor; a Top

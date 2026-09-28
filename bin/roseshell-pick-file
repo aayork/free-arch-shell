@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+
+# roseshell:summary=Pick a file with the desktop's own file chooser and print its path
+# roseshell:args=[--title <title>] [--folder <dir>] [--images]
+# roseshell:examples=roseshell pick-file --images --folder ~/Pictures
+
+# Goes through the xdg-desktop-portal FileChooser, so the dialog is whichever
+# backend the portal config prefers (the default file manager's picker when it
+# ships one). Prints the chosen path and exits 0, or exits 1 on cancel.
+
+import argparse
+import os
+import sys
+from urllib.parse import unquote, urlparse
+
+from gi.repository import Gio, GLib
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--title", default="Choose a file")
+parser.add_argument("--folder", default="")
+parser.add_argument("--images", action="store_true", help="filter to images and videos")
+args = parser.parse_args()
+
+bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+token = "roseshell_pick_%d" % os.getpid()
+sender = bus.get_unique_name()[1:].replace(".", "_")
+request_path = "/org/freedesktop/portal/desktop/request/%s/%s" % (sender, token)
+
+options = {
+    "handle_token": GLib.Variant("s", token),
+    "modal": GLib.Variant("b", True),
+}
+if args.folder and os.path.isdir(args.folder):
+    options["current_folder"] = GLib.Variant("ay", os.path.abspath(args.folder).encode() + b"\0")
+if args.images:
+    images = [(0, "*." + ext) for ext in ("png", "jpg", "jpeg", "webp", "gif", "bmp")]
+    videos = [(0, "*." + ext) for ext in ("mp4", "m4v", "mov", "webm", "mkv", "avi")]
+    options["filters"] = GLib.Variant("a(sa(us))", [
+        ("Images and videos", images + videos),
+        ("Images", images),
+        ("Videos", videos),
+    ])
+
+loop = GLib.MainLoop()
+result = {"code": 1, "path": None}
+
+
+def on_response(_conn, _sender, _path, _iface, _signal, params):
+    code, results = params.unpack()
+    uris = results.get("uris") or []
+    if code == 0 and uris:
+        result["code"] = 0
+        result["path"] = unquote(urlparse(uris[0]).path)
+    loop.quit()
+
+
+# Subscribe before calling, so a fast response can't slip past.
+bus.signal_subscribe(
+    "org.freedesktop.portal.Desktop", "org.freedesktop.portal.Request", "Response",
+    request_path, None, Gio.DBusSignalFlags.NONE, on_response,
+)
+
+try:
+    bus.call_sync(
+        "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.FileChooser", "OpenFile",
+        GLib.Variant("(ssa{sv})", ("", args.title, options)),
+        None, Gio.DBusCallFlags.NONE, -1, None,
+    )
+except GLib.Error as e:
+    print("File chooser portal unavailable: %s" % e.message, file=sys.stderr)
+    sys.exit(2)
+
+loop.run()
+if result["path"]:
+    print(result["path"])
+sys.exit(result["code"])

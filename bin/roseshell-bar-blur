@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# roseshell:summary=Set the blur Hyprland draws behind a transparent bar
+# roseshell:args=<on|off> [size] [passes]
+# roseshell:examples=roseshell bar-blur on 8 2
+
+# hyprland.lua carries a layer rule that blurs behind the "roseshell-bar"
+# namespace, so this only has to switch Hyprland's blur on and size it. The
+# settings are kept in a small Lua file that hyprland.lua loads last, so they
+# survive a Hyprland reload, and are applied to the running session right away.
+
+STATE_FILE="$HOME/.local/state/roseshell/bar-blur.lua"
+
+case "$1" in
+  on) enabled=true ;;
+  off) enabled=false ;;
+  *)
+    echo "Usage: roseshell-bar-blur <on|off> [size] [passes]" >&2
+    exit 1
+    ;;
+esac
+
+size=${2:-8}
+passes=${3:-2}
+if [[ ! $size =~ ^[0-9]+$ || ! $passes =~ ^[0-9]+$ ]]; then
+  echo "size and passes must be whole numbers" >&2
+  exit 1
+fi
+(( size < 1 )) && size=1
+(( size > 30 )) && size=30
+(( passes < 1 )) && passes=1
+(( passes > 6 )) && passes=6
+
+lua="hl.config({ decoration = { blur = { enabled = $enabled, size = $size, passes = $passes } } })"
+
+mkdir -p "${STATE_FILE%/*}"
+printf -- '-- Written by roseshell-bar-blur; loaded from hyprland.lua.\n%s\n' "$lua" >"$STATE_FILE.new" &&
+  mv "$STATE_FILE.new" "$STATE_FILE"
+
+hyprctl eval "$lua" >/dev/null

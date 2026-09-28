@@ -4,7 +4,11 @@
 # roseshell:args=[--status]
 # roseshell:examples=roseshell toggle nightlight
 
-ON_TEMP=4000
+# The shell's night light settings pick the intensity (nightlight.temperature).
+ON_TEMP=$(jq -r '.nightlight.temperature // 4000 | floor' "$HOME/.config/roseshell/shell.json" 2>/dev/null)
+[[ $ON_TEMP =~ ^[0-9]+$ ]] || ON_TEMP=4000
+(( ON_TEMP < 2500 )) && ON_TEMP=2500
+(( ON_TEMP > 5500 )) && ON_TEMP=5500
 OFF_TEMP=6500
 IDENTITY_TEMP=6000
 
@@ -47,7 +51,7 @@ fi
 # Query the current temperature
 CURRENT_TEMP=$(current_temp)
 
-if [[ -z $CURRENT_TEMP || $CURRENT_TEMP == $OFF_TEMP ]]; then
+if [[ -z $CURRENT_TEMP ]] || (( CURRENT_TEMP >= IDENTITY_TEMP )); then
   TARGET_TEMP=$ON_TEMP
 else
   TARGET_TEMP=$OFF_TEMP
