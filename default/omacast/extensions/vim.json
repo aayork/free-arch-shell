@@ -1,0 +1,16 @@
+{
+  "id": "vim",
+  "title": "Vim Keys",
+  "keyword": "vim",
+  "aliases": ["nvim", "vi", "neovim", "vimkeys"],
+  "subtitle": "Vim keybinding",
+  "glyph": "",
+  "search": "roseshell-vim-keys {query}",
+  "when": "command -v nvim",
+  "minChars": 0,
+  "debounceMs": 120,
+  "timeoutMs": 8000,
+  "maxRows": 80,
+  "tier": "prefix",
+  "view": "shortcuts"
+}

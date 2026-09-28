@@ -1,0 +1,236 @@
+#!/bin/bash
+
+# roseshell:summary=Search Vim/Neovim keybindings as Omacast rows (your config plus the built-ins)
+# roseshell:args=[query]
+# roseshell:examples=roseshell-vim-keys window split
+
+# Answers Omacast's `vim:` keyword, drawn by the same keycap view as
+# `shortcuts:`. Two sources, both read from the machine rather than typed out:
+#
+#   Your mappings   nvim_get_keymap() from a headless Neovim with your config
+#                   loaded and VeryLazy fired, so LazyVim's and every plugin's
+#                   lazy `keys` show up with their descriptions.
+#   The built-ins   Neovim's own `:help index` ($VIMRUNTIME/doc/index.txt),
+#                   modes 1-5. Ex commands are left out: they are not keys.
+#
+# A built-in that your config remaps in the same mode is dropped, so a key is
+# only ever described by what it does on this machine.
+#
+# Enter copies the keys in Vim notation (<leader>ff, <C-w>h); built-ins also
+# offer to open their :help page.
+
+set -uo pipefail
+
+query="${1:-}"
+
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/roseshell"
+cache="$cache_dir/vim-keys.tsv"
+nvim_config="${XDG_CONFIG_HOME:-$HOME/.config}/nvim"
+
+command -v nvim >/dev/null 2>&1 || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
+
+runtime=$(nvim --headless --clean -i NONE -n \
+  -c 'lua io.stdout:write(vim.env.VIMRUNTIME)' -c 'qa!' 2>/dev/null)
+index="$runtime/doc/index.txt"
+
+# Records are: origin, mode, keys in Vim notation, description, help tag.
+config_maps() {
+  local dump
+  dump=$(mktemp --suffix=.lua) || return 1
+  cat >"$dump" <<'LUA'
+pcall(vim.api.nvim_exec_autocmds, "User", { pattern = "VeryLazy", modeline = false })
+local leader = vim.g.mapleader or "\\"
+local out = {}
+local function clean(s) return (tostring(s or ""):gsub("[\t\r\n]+", " ")) end
+for _, mode in ipairs({ "n", "x", "o", "i", "c", "t" }) do
+  for _, map in ipairs(vim.api.nvim_get_keymap(mode)) do
+    local keys = vim.fn.keytrans(map.lhsraw or map.lhs)
+    local desc = clean(map.desc)
+    if desc == "" then desc = clean(map.rhs) end
+    local skip = desc == "" or desc == "which_key_ignore"
+      or keys:find("<Plug>", 1, true) or keys:find("<SNR>", 1, true)
+      or keys:find("Mouse>", 1, true) or keys:find("<ScrollWheel", 1, true)
+    if not skip then
+      local lt = vim.fn.keytrans(leader)
+      if keys:sub(1, #lt) == lt then keys = "<leader>" .. keys:sub(#lt + 1) end
+      table.insert(out, table.concat({ "config", mode, keys, desc, "" }, "\t"))
+    end
+  end
+end
+io.stdout:write(table.concat(out, "\n") .. "\n")
+vim.cmd("qa!")
+LUA
+  # -i NONE and -n: a lookup must not write shada or swap files.
+  timeout 8 nvim --headless -i NONE -n -c "luafile $dump" 2>/dev/null
+  rm -f "$dump"
+}
+
+# index.txt rows are "|tag|<TAB>keys<TAB>[note] action", with the action
+# wrapping onto tab-indented lines below. Rows without a tag are "not used".
+builtin_maps() {
+  [[ -r $index ]] || return 0
+  awk -F'\t' '
+    function flush() {
+      if (tag != "" && keys != "" && action != "" && action !~ /^not used/)
+        printf "builtin\t%s\t%s\t%s\t%s\n", mode, keys, action, tag
+      tag = ""; keys = ""; action = ""
+    }
+    function note_strip(s) { sub(/^[ \t]*[12]?[ \t]+/, "", s); sub(/^[ \t]+/, "", s); return s }
+    /^1\. Insert mode/          { flush(); mode = "i"; next }
+    /^2\. Normal mode/          { flush(); mode = "n"; next }
+    /^2\.1 Text objects/        { flush(); mode = "obj"; next }
+    /^2\.2 /                    { flush(); mode = "n"; next }
+    /^2\.6 Operator-pending/    { flush(); mode = "o"; next }
+    /^3\. Visual mode/          { flush(); mode = "x"; next }
+    /^4\. Command-line editing/ { flush(); mode = "c"; next }
+    /^5\. Terminal mode/        { flush(); mode = "t"; next }
+    /^6\. EX commands/          { flush(); exit }
+    mode == "" { next }
+    /^\|[^|]+\|/ {
+      flush()
+      line = $0
+      match(line, /^\|[^|]+\|/)
+      tag = substr(line, 2, RLENGTH - 2)
+      rest = substr(line, RLENGTH + 1)
+      sub(/^[ \t]+/, "", rest)
+      split_at = index(rest, "\t")
+      if (split_at == 0) { keys = rest; action = ""; next }
+      keys = substr(rest, 1, split_at - 1)
+      action = note_strip(substr(rest, split_at))
+      next
+    }
+    /^\t\t/ && tag != "" {
+      more = note_strip($0)
+      action = action == "" ? more : action " " more
+      next
+    }
+    { flush() }
+    END { flush() }
+  ' "$index"
+}
+
+# Rebuilt only when the Neovim config or runtime changed since the last run,
+# so a keystroke in the launcher does not start Neovim every time.
+stale() {
+  [[ -s $cache ]] || return 0
+  [[ -n $(find "$nvim_config" "$index" -newer "$cache" -print -quit 2>/dev/null) ]]
+}
+
+if stale; then
+  mkdir -p "$cache_dir"
+  tmp=$(mktemp "$cache.XXXXXX") || exit 0
+  { config_maps; builtin_maps; } >"$tmp"
+  mv -f "$tmp" "$cache"
+fi
+
+jq -R -n -c --arg q "$query" '
+  def modes: { "n": [0, "Normal"], "x": [1, "Visual"], "obj": [2, "Text objects"],
+               "o": [3, "Operator-pending"], "i": [4, "Insert"],
+               "c": [5, "Command-line"], "t": [6, "Terminal"] };
+
+  def keyname:
+    { "Space":"Space", "CR":"Enter", "Enter":"Enter", "Return":"Enter",
+      "NL":"NL", "Esc":"Esc", "BS":"Backspace", "Tab":"Tab", "Del":"Del",
+      "Up":"↑", "Down":"↓", "Left":"←", "Right":"→", "lt":"<", "Bslash":"\\",
+      "Bar":"|", "leader":"Leader", "Leader":"Leader",
+      "LocalLeader":"LocalLeader", "PageUp":"PgUp", "PageDown":"PgDn",
+      "Home":"Home", "End":"End", "Insert":"Ins" }[.] // .;
+
+  # <C-S-x>, <M-x>, <Space> -> Ctrl+Shift+X, Alt+x, Space
+  def angle:
+    .[1:-1]
+    | capture("^(?<m>(?:[CMASDcmasd]-)*)(?<k>.+)$")
+    | (.m | ascii_upcase | [scan("[CMASD]")]
+         | map({ "C":"Ctrl", "M":"Alt", "A":"Alt", "S":"Shift", "D":"Super" }[.])) as $mods
+    | (.k | keyname) as $k
+    | ($mods + [ if ($mods | index("Ctrl")) and ($k | length) == 1
+                 then ($k | ascii_upcase) else $k end ])
+    | join("+");
+
+  # One keycap per keystroke. `:help index` spells Ctrl as CTRL-X and spaces
+  # its sequences; keytrans() spells it <C-X> and does not.
+  def chip:
+    if startswith("CTRL-") then
+      .[5:] as $r
+      | "Ctrl+" + (if ($r | startswith("<")) then ($r | angle | ltrimstr("Ctrl+"))
+                   else ($r | ascii_upcase) end)
+    elif test("^<.+>$") then angle
+    else . end;
+
+  def chips: [ scan("CTRL-(?:<[^<>]+>|\\S)|<[^<>]+>|\\{[^}]+\\}|\\S") | chip ];
+
+  [ inputs | split("\t") | select(length >= 5)
+    | { origin: .[0], mode: .[1], notation: .[2], action: .[3], tag: .[4] }
+    | select(modes[.mode] != null)
+    | . + { keys: (.notation | chips) }
+    | select(.keys | length > 0) ]
+
+  # A built-in your config remaps in the same mode is not what that key does.
+  | ([ .[] | select(.origin == "config") | "\(.mode)|\(.keys | join(" "))" ]
+     | map({ key: ., value: true }) | from_entries) as $mine
+  | map(select(.origin == "config"
+               or ($mine["\(if .mode == "obj" then "o" else .mode end)|\(.keys | join(" "))"] | not)))
+
+  | map(
+      (modes[.mode]) as $m
+      | . + {
+          rank: ($m[0] * 2 + (if .origin == "config" then 0 else 1 end)),
+          group: ($m[1] + (if .origin == "config" then "" else " · built-in" end)),
+          hay: ([ (.keys | join(" ")), .notation, .action, $m[1], .tag,
+                  (if .origin == "config" then "mine config lazyvim" else "builtin vim" end),
+                  (if (.notation | startswith("<leader>")) then "leader space" else "" end)
+                ] | join(" ") | ascii_downcase)
+        }
+      | . + { words: (.hay | split(" ") | map(select(length > 0))) }
+    )
+
+  # Same rule as `shortcuts:`: a term matches the start of a word, or anywhere
+  # once it is three characters or more.
+  | (($q | ascii_downcase | split(" ") | map(select(length > 0))) // []) as $terms
+  | map(
+      . as $r
+      | select(all($terms[];
+          . as $t
+          | (any($r.words[]; startswith($t)))
+            or (($t | length) >= 3 and ($r.hay | contains($t)))))
+    )
+
+  # Inside a group, keys that start with what was typed come first, so
+  # `leader f` leads with <leader>f… rather than <leader><Tab>f.
+  | ($q | ascii_downcase | gsub("[+\\s]+"; " ") | ltrimstr(" ")) as $lead
+  | sort_by(.rank,
+            (if $lead != "" and ((.keys | join(" ") | ascii_downcase | gsub("[+]"; " "))
+                                 | startswith($lead))
+             then 0 else 1 end))  # stable: each source keeps its own order
+
+  | to_entries
+  | map(
+      .key as $i
+      | .value
+      | ("printf %s " + (.notation | @sh) + " | wl-copy") as $copyKeys
+      | {
+          id: "vim|\(.mode)|\(.notation)|\(.action)",
+          title: .action,
+          subtitle: (.keys | join(" ")),
+          group: .group,
+          keys: .keys,
+          accessory: "",
+          view: "shortcuts",
+          exec: $copyKeys,
+          score: (99999 - $i),
+          actions: ([
+            { title: "Copy Keys", shortcut: "↵", exec: $copyKeys },
+            { title: "Copy Description",
+              exec: ("printf %s " + (.action | @sh) + " | wl-copy") }
+          ] + (if .tag != "" then [
+            { title: "Open :help \(.tag)",
+              exec: ("setsid -f xdg-terminal-exec nvim " + ("+help " + .tag | @sh)
+                     + " +only >/dev/null 2>&1") }
+          ] else [] end))
+        }
+    )
+  | .[]
+' <"$cache" 2>/dev/null
+
+exit 0
