@@ -1,10 +1,14 @@
 # Roseshell
 
-Roseshell is a desktop shell for [Hyprland](https://hypr.land/), built on
-[Quickshell](https://quickshell.org/). It is a fork of the shell from
-[Omarchy](https://omarchy.org), DHH's Arch-based distribution, pulled out so it
-runs on an ordinary Arch (or CachyOS) Hyprland setup without the rest of the
-distribution.
+Roseshell is a fork of the [Omarchy](https://omarchy.org) shell, meant to be
+installed on other distros.
+
+Omarchy is DHH's Arch-based Linux distribution, and its desktop is a
+[Quickshell](https://quickshell.org/) shell for [Hyprland](https://hypr.land/)
+that normally only runs as part of an Omarchy install. Roseshell takes that
+shell out on its own, so you can run it on your existing system instead of
+installing Omarchy: any distro with Hyprland, Quickshell and systemd. It was
+built on CachyOS, and nothing it runs is tied to Arch or its package manager.
 
 One long-running Quickshell process hosts the whole desktop: the top bar, the
 lock screen, notifications, on-screen displays, the wallpaper, the idle
@@ -18,7 +22,8 @@ and third-party plugins load from disk the same way.
   it hides over fullscreen apps: touch the top edge and it slides down, like
   the macOS menu bar.
 - **Panels**: audio devices and volume, Wi-Fi (including a QR code to share
-  the network), Bluetooth, power, weather.
+  the network), Bluetooth, power profiles and system stats, weather, and
+  network and disk speed tests.
 - **Calendar**: iCloud CalDAV sync and ICS feed subscriptions.
 - **Lock screen and idle**: screensaver, then lock, then screen off. The
   screensaver plays Apple aerial videos with mpv, and it holds off while media
@@ -35,14 +40,16 @@ and third-party plugins load from disk the same way.
 
 ## How it differs from Omarchy
 
-- **No Omarchy install needed.** It runs on plain Hyprland with a Lua config.
-  It does not need UWSM: app launches fall back to `gtk-launch` when
-  `uwsm-app` is missing.
+- **Installs on other distros.** It runs on plain Hyprland with a Lua config,
+  with no Omarchy install underneath. It does not need UWSM: every launch uses
+  `uwsm-app` when it is there and starts the app directly when it is not.
 - **Renamed throughout.** Commands, IPC targets, window classes and config
   paths use `roseshell` (`roseshell-*` scripts, `~/.config/roseshell/`,
   `ROSESHELL_PATH`).
-- **Only the shell.** The installer, package management, migrations and
-  bundled apps are left out.
+- **Only the shell.** Omarchy's installer, package management, update
+  channel, migrations and bundled apps are left out. (The Omarchy system menu
+  is still in `shell/plugins/menu/`, but its install and remove entries assume
+  Arch's `pacman` and are not used.)
 - **Fork-only features**: the aerial screensaver, the fullscreen bar peek, the
   calendar plugin, the Settings panel and the wallpaper theme generator.
 
@@ -71,9 +78,17 @@ git sparse-checkout set /shell /bin /config /default /themes /README.md /LICENSE
 
 ## Running it
 
-You need Hyprland, Quickshell, and the tools the panels use: NetworkManager
-(`nmcli`), `bluetoothctl`, PipeWire (`wpctl`), `jq`, `qrencode`, `mpv`,
-`playerctl`, and a [Nerd Font](https://www.nerdfonts.com/).
+You need:
+
+- Hyprland (a version with the Lua config), Quickshell, and systemd
+- NetworkManager (`nmcli`), BlueZ (`bluetoothctl`), PipeWire (`wpctl`)
+- `jq`, `curl`, `wl-clipboard`, `wtype`, `playerctl`, `brightnessctl`
+- a [Nerd Font](https://www.nerdfonts.com/)
+
+Some features need a little more: `mpv` for the aerial screensaver,
+`qrencode` for the Wi-Fi QR code, `hyprsunset` for night light,
+`power-profiles-daemon` and `upower` for the power panel, and `tailscale` for
+the Tailscale panel. The package names are much the same on every distro.
 
 1. Put the scripts on your `PATH`, for example by symlinking
    `bin/roseshell-*` into `~/.local/bin`.
