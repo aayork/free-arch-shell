@@ -1,5 +1,5 @@
 #!/bin/bash
-# roseshell:summary=Install and manage free-arch-shell plugins from the command line
+# roseshell:summary=Install and manage Roseshell plugins from the command line
 # roseshell:args=<add|enable|disable|remove|list> [args...]
 # roseshell:examples=roseshell-plugin add https://github.com/Owaisshaikh11/omarchy-session-menu.git --enable
 #                   roseshell-plugin enable bo.omacast
