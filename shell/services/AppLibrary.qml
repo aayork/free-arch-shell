@@ -22,6 +22,19 @@ Item {
   // whenever the app list changes, so newly installed apps get their icon live.
   property var iconIndex: ({})
   property var pendingIconIndex: ({})
+  // Icon theme whose app icons win over every other theme's in the index, so
+  // the launcher keeps one consistent style. Without it the first file found
+  // wins, which is filesystem order and mixes hicolor icons in at random.
+  // Its apps/ and devices/ are scanned with a trailing slash because themes
+  // like Colloid symlink them to a sibling variant and find won't follow that.
+  property string preferredIconTheme: "Colloid"
+  // Apps whose own icon name the preferred theme lacks, but which it covers
+  // under another name. Only used when the alias actually resolves.
+  readonly property var iconAliases: ({
+    "spotify-launcher": "spotify-client",
+    "geforcenow-electron": "io.github.hmlendea.geforcenow-electron",
+    "/usr/share/gpsd/icons/gpsd-logo.png": "gpsd"
+  })
 
   property int launchSerial: 0
   property int launchToplevelCount: 0
@@ -57,6 +70,9 @@ Item {
   function iconSource(icon) {
     var value = String(icon || "")
     if (value.length === 0) return Quickshell.iconPath("application-x-executable", true)
+    // Aliases go before the path checks, since some keys are absolute paths.
+    var alias = root.iconAliases[value]
+    if (alias && root.iconIndex[alias]) return Util.fileUrl(root.iconIndex[alias])
     if (value.indexOf("file://") === 0 || value.indexOf("image://") === 0) return value
     if (value.charAt(0) === "/") return Util.fileUrl(value)
     // Prefer the context-limited app/device index. An unconstrained themed
@@ -134,6 +150,12 @@ Item {
     return [
       'dirs="$HOME/.icons $HOME/.local/share/icons";',
       'IFS=":"; for d in ${XDG_DATA_DIRS:-/usr/local/share:/usr/share}; do dirs="$dirs $d/icons"; done; unset IFS;',
+      'theme=' + Util.shellQuote(root.preferredIconTheme) + ';',
+      'for ext in svg png; do',
+      '  for base in $dirs; do',
+      '    [[ -n $theme && -d $base/$theme ]] && find "$base/$theme/apps/" "$base/$theme/devices/" -name "*.$ext" 2>/dev/null;',
+      '  done;',
+      'done;',
       'for ext in svg png; do',
       '  for base in $dirs; do',
       '    [[ -d $base ]] && find "$base" \\( -path "*/apps/*" -o -path "*/devices/*" \\) -name "*.$ext" 2>/dev/null;',
