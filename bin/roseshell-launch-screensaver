@@ -21,11 +21,14 @@ shopt -u nullglob
 focused=$(roseshell-hyprland-monitor-focused)
 
 for m in $(hyprctl monitors -j | jq -r '.[] | select(.disabled == false) | .name'); do
-  hyprctl dispatch focusmonitor "$m" >/dev/null
+  hyprctl dispatch "hl.dsp.focus({ monitor = \"$m\" })" >/dev/null
 
   # panscan=1.0 crops the video to fill the screen instead of letterboxing,
-  # since the aerial videos are 16:9 and displays here are not.
-  mpv \
+  # since the aerial videos are 16:9 and displays here are not. setsid -f puts
+  # mpv in its own session: the idle service's Process tears down whatever is
+  # left in its process group when this script exits, which killed mpv
+  # mid-startup.
+  setsid -f mpv \
     --wayland-app-id=org.roseshell.screensaver \
     --fullscreen \
     --no-osc \
@@ -39,10 +42,9 @@ for m in $(hyprctl monitors -j | jq -r '.[] | select(.disabled == false) | .name
     --cursor-autohide=1000 \
     --really-quiet \
     --idle=no \
-    "${videos[@]}" &
-  disown
+    "${videos[@]}" >/dev/null 2>&1
 
   sleep 0.3
 done
 
-[[ -n $focused ]] && hyprctl dispatch focusmonitor "$focused" >/dev/null
+[[ -n $focused ]] && hyprctl dispatch "hl.dsp.focus({ monitor = \"$focused\" })" >/dev/null
