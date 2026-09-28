@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# roseshell:summary=Check if a toggle is enabled (flag file exists)
+# roseshell:args=<flag-name>
+
+[[ -f "$HOME/.local/state/roseshell/toggles/$1" ]]

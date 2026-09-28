@@ -11,4 +11,7 @@ cmd="$*"
 # 130 is the user bailing with Ctrl-C; anything else gets the Done/Failed prompt.
 presentation_script="roseshell-show-logo; $cmd; code=\$?; if (( code != 130 )); then roseshell-show-done \$code; fi"
 
-exec setsid uwsm-app -- xdg-terminal-exec --app-id=org.roseshell.terminal --title=Roseshell -e bash -c "$presentation_script"
+# uwsm-app exists only inside a UWSM session; elsewhere launch directly.
+app_launcher=()
+command -v uwsm-app >/dev/null 2>&1 && app_launcher=(uwsm-app --)
+exec setsid "${app_launcher[@]}" xdg-terminal-exec --app-id=org.roseshell.terminal --title=Roseshell -e bash -c "$presentation_script"

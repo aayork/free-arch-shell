@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# roseshell:summary=Toggle bar visibility without killing the Roseshell shell
+# roseshell:args=[toggle|on|off]
+# roseshell:examples=roseshell toggle bar | roseshell toggle bar off | roseshell toggle bar on
+
+# The flag is named bar-off, so "on" (show the bar) clears it and "off" sets it.
+case "${1:-toggle}" in
+  on) roseshell-toggle bar-off off ;;
+  off) roseshell-toggle bar-off on ;;
+  *) roseshell-toggle bar-off "${1:-toggle}" ;;
+esac
+
+# The shell's watch on the toggles directory can miss flag changes that land in
+# quick succession, stranding the bar off screen until the shell restarts.
+# Nudge the bar to re-read the flag; quiet best-effort so the toggle still
+# works when the shell is not up.
+roseshell-shell -q roseshell.bar syncHidden

@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# roseshell:summary=Launch a TUI command in the default terminal with Roseshell styling
+# roseshell:args=[--app-id=<app-id>] <command> [args...]
+
+if [[ ${1:-} == --app-id=* ]]; then
+  APP_ID="${1#--app-id=}"
+  shift
+else
+  APP_ID="org.roseshell.$(basename $1)"
+fi
+
+# uwsm-app exists only inside a UWSM session; elsewhere launch directly.
+command -v uwsm-app >/dev/null 2>&1 || exec setsid xdg-terminal-exec --app-id=$APP_ID -e "$1" "${@:2}"
+exec setsid uwsm-app -- xdg-terminal-exec --app-id=$APP_ID -e "$1" "${@:2}"

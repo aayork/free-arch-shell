@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# roseshell:summary=Launch an app or focus an existing window matching a pattern
+# roseshell:args=<window-pattern> <launch-command>
+
+if (($# == 0)); then
+  echo "Usage: roseshell-launch-or-focus [window-pattern] [launch-command]"
+  exit 1
+fi
+
+WINDOW_PATTERN="$1"
+LAUNCH_COMMAND="${2:-"uwsm-app -- $WINDOW_PATTERN"}"
+# uwsm-app exists only inside a UWSM session; elsewhere launch directly, even
+# when a caller spelled the uwsm-app prefix out itself.
+if ! command -v uwsm-app >/dev/null 2>&1; then
+  LAUNCH_COMMAND=${LAUNCH_COMMAND#uwsm-app -- }
+fi
+WINDOW_ADDRESS=$(hyprctl clients -j | jq -r --arg p "$WINDOW_PATTERN" '.[]|select((.class|test("\\b" + $p + "\\b";"i")) or (.title|test("\\b" + $p + "\\b";"i")))|.address' | head -n1)
+
+if [[ -n $WINDOW_ADDRESS ]]; then
+  hyprctl dispatch "hl.dsp.focus({ window = \"address:$WINDOW_ADDRESS\" })" >/dev/null 2>&1 || hyprctl dispatch focuswindow "address:$WINDOW_ADDRESS"
+else
+  eval exec setsid $LAUNCH_COMMAND
+fi

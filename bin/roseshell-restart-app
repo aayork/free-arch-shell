@@ -4,4 +4,7 @@
 # roseshell:args=<application-name> [application-args...]
 
 pkill -x -- "$1"
-setsid uwsm-app -- "$@" >/dev/null 2>&1 &
+# uwsm-app exists only inside a UWSM session; elsewhere launch directly.
+app_launcher=()
+command -v uwsm-app >/dev/null 2>&1 && app_launcher=(uwsm-app --)
+setsid "${app_launcher[@]}" "$@" >/dev/null 2>&1 &

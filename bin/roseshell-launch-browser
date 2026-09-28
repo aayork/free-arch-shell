@@ -17,9 +17,12 @@ else
   private_flag="--incognito"
 fi
 
+# uwsm-app exists only inside a UWSM session; elsewhere launch directly.
+app_launcher=()
+command -v uwsm-app >/dev/null 2>&1 && app_launcher=(uwsm-app --)
 systemd-run --user --quiet --collect --unit="roseshell-browser-$(date +%s%N)" \
   --property=StandardOutput=null --property=StandardError=null \
-  uwsm-app -- "$browser_exec" "${@/--private/$private_flag}"
+  "${app_launcher[@]}" "$browser_exec" "${@/--private/$private_flag}"
 
 url=""
 for argument in "$@"; do
