@@ -71,8 +71,8 @@ scripts) is upstream Omarchy, kept for merging and not used by Roseshell.
 A sparse checkout of just the paths above is enough to run it:
 
 ```sh
-git clone --filter=blob:none --sparse https://github.com/aayork/roseshell ~/projects/roseshell
-cd ~/projects/roseshell
+git clone --filter=blob:none --sparse https://github.com/aayork/roseshell ~/Projects/roseshell
+cd ~/Projects/roseshell
 git sparse-checkout set /shell /bin /config /default /themes /README.md /LICENSE
 ```
 
@@ -96,7 +96,7 @@ the Tailscale panel. The package names are much the same on every distro.
    `hyprland.lua`:
 
    ```lua
-   local roseshellPath = os.getenv("HOME") .. "/projects/roseshell"
+   local roseshellPath = os.getenv("HOME") .. "/Projects/roseshell"
 
    hl.env("ROSESHELL_PATH", roseshellPath)
    hl.env("PATH", os.getenv("HOME") .. "/.local/bin:" .. (os.getenv("PATH") or "/usr/local/bin:/usr/bin"))
