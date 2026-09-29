@@ -379,6 +379,7 @@ post_theme_commands=(
   roseshell-theme-set-obsidian
   roseshell-theme-set-keyboard
   roseshell-theme-set-termusic
+  roseshell-theme-set-rmpc
 )
 
 if [[ $THEME_HEADLESS != "1" ]]; then

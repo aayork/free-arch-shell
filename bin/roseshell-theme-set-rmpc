@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# roseshell:summary=Apply current Roseshell theme colors to rmpc
+# roseshell:hidden=true
+
+# rmpc's stock theme only uses the 16 terminal colors, so it already follows
+# the palette the terminal gets from the theme -- except that its highlights
+# are "blue", not the theme's accent. Rebuild it from `rmpc theme` (so rmpc
+# upgrades still bring their layout changes) with blue as the accent and black,
+# the text on highlighted rows, as the background. rmpc hot-reloads the file.
+
+CONFIG="$HOME/.config/rmpc/config.ron"
+THEME="$HOME/.config/rmpc/themes/roseshell.ron"
+COLORS_TOML="$HOME/.local/state/roseshell/current/theme/colors.toml"
+
+command -v rmpc >/dev/null && [[ -f $CONFIG && -f $COLORS_TOML ]] || exit 0
+
+background=$(roseshell-theme-color --file "$COLORS_TOML" background)
+accent=$(roseshell-theme-color --file "$COLORS_TOML" accent blue)
+[[ -n $background && -n $accent ]] || exit 0
+
+mkdir -p "${THEME%/*}"
+tmp=$(mktemp)
+# The volume slider has no styles in the stock theme and falls back to a
+# built-in blue, so give it the accent explicitly.
+rmpc theme | sed -e "s/\"blue\"/\"$accent\"/g" -e "s/\"black\"/\"$background\"/g" \
+  -e "s/\(Slider(symbols: ([^)]*)\))/\1, filled_style: (fg: \"$accent\"), thumb_style: (fg: \"$accent\"))/" >"$tmp" &&
+  [[ -s $tmp ]] && mv "$tmp" "$THEME" || rm -f "$tmp"
+
+# Point rmpc at it once; leave any other theme the user picked alone.
+sed -i 's/^\(\s*\)theme: None,/\1theme: Some("roseshell"),/' "$CONFIG"
