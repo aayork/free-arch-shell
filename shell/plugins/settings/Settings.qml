@@ -1,9 +1,13 @@
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Networking
+import Quickshell.Bluetooth
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../panels/network/Model.js" as NetModel
+import "../panels/bluetooth/Model.js" as BtModel
 
 // A small settings panel: appearance (theme/background/font/cursor/icons),
 // a few shell-wide toggles, and plugin enable/disable. Everything here
@@ -28,26 +32,28 @@ Item {
   // its corners, the same rule the shared ToggleSwitch follows.
   readonly property bool pillShapes: Style.cornerRadius > 0
   property string fontFamily: Style.font.menuFamily
-  property int cardWidth: Math.min(Style.space(560), panel.width - Style.gapsOut * 2)
+  property int cardWidth: Math.min(Style.space(620), panel.width - Style.gapsOut * 2)
   property int cardMaxHeight: Math.max(Style.space(300), panel.height - Style.gapsOut * 6)
 
-  property string activeTab: "appearance" // appearance | shell | windows | plugins
+  property string activeTab: "appearance" // appearance | shell | windows | network | bluetooth | plugins
 
   function open(payloadJson) {
     root.opened = true
     var payload = {}
     try { payload = JSON.parse(payloadJson || "{}") || {} } catch (e) {}
-    root.activeTab = ["appearance", "shell", "windows", "plugins"].indexOf(payload.tab) !== -1 ? payload.tab : "appearance"
+    root.activeTab = ["appearance", "shell", "windows", "network", "bluetooth", "plugins"].indexOf(payload.tab) !== -1 ? payload.tab : "appearance"
     root.refreshAll()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
   function close() {
     root.opened = false
+    root.cancelPasswordPrompt()
   }
 
   function dismiss() {
     root.opened = false
+    root.cancelPasswordPrompt()
     if (root.shell && typeof root.shell.hide === "function")
       root.shell.hide((root.manifest && root.manifest.id) || "roseshell.settings")
   }
@@ -72,6 +78,7 @@ Item {
     shellConfigProbe.running = true
     nightlightProbe.running = true
     pluginListProbe.running = true
+    root.refreshNetwork()
   }
 
   function stripQuotes(s) {
@@ -602,6 +609,499 @@ Item {
     return Math.round((5500 - temp) / 3000 * 100)
   }
 
+  // ============================================================ network
+
+  // Wi-Fi goes through the same Quickshell.Networking backend the bar's network
+  // panel uses; connection details and DNS come from its CLI helpers. Rows are
+  // primitive snapshots (NetModel.wifiRow) and actions look the live network
+  // up by SSID, for the reason given in wifiRow.
+  readonly property bool networkTabActive: root.opened && root.activeTab === "network"
+  readonly property bool networkManagerAvailable: Networking.backend === NetworkBackendType.NetworkManager
+  readonly property var netDevices: Networking.devices ? Networking.devices.values : []
+  readonly property var wifiDevice: {
+    var fallback = null
+    for (var i = 0; i < root.netDevices.length; i++) {
+      var d = root.netDevices[i]
+      if (!d || d.type !== DeviceType.Wifi) continue
+      if (d.connected) return d
+      if (!fallback) fallback = d
+    }
+    return fallback
+  }
+  readonly property var wifiNetworkObjects: root.wifiDevice && root.wifiDevice.networks ? root.wifiDevice.networks.values : []
+  // Built in a binding so a network connecting, being forgotten or changing
+  // signal re-sorts the list without a poll.
+  readonly property var wifiRows: {
+    var rows = []
+    for (var i = 0; i < root.wifiNetworkObjects.length; i++) {
+      var row = NetModel.wifiRow(root.wifiNetworkObjects[i])
+      if (row && row.ssid !== "") rows.push(row)
+    }
+    return NetModel.sortWifiRows(rows)
+  }
+  readonly property var connectedWifiRow: root.wifiRows.length > 0 && root.wifiRows[0].connected ? root.wifiRows[0] : null
+
+  property var netInfo: ({})
+  property string dnsProvider: ""
+  property string pendingDnsProvider: ""
+  property bool wifiScanning: false
+
+  // One Wi-Fi action at a time, as in the panel. The network object is held
+  // only while its action runs, to hear connectionFailed.
+  property var wifiActionNetwork: null
+  property string wifiActionSsid: ""
+  property string wifiActionKind: "" // connect | disconnect | forget
+  property string wifiFailureSsid: ""
+  property string wifiFailureReason: ""
+  property string passwordSsid: ""
+  property bool passwordEnterprise: false
+  readonly property bool wifiBusy: root.wifiActionKind !== ""
+
+  function refreshNetwork() {
+    if (!netDetailsProbe.running) netDetailsProbe.running = true
+    if (!dnsProbe.running) dnsProbe.running = true
+  }
+
+  Process {
+    id: netDetailsProbe
+    command: ["roseshell-network-status", "--verbose"]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.netInfo = NetModel.parseKeyValue(text) }
+  }
+
+  Process {
+    id: dnsProbe
+    command: ["roseshell-dns"]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.dnsProvider = String(text || "").trim() || "DHCP" }
+  }
+
+  Timer {
+    interval: 2000
+    repeat: true
+    running: root.networkTabActive
+    onTriggered: if (!netDetailsProbe.running) netDetailsProbe.running = true
+  }
+
+  onNetworkTabActiveChanged: {
+    root.syncScanner()
+    if (root.networkTabActive) root.refreshNetwork()
+    else root.cancelPasswordPrompt()
+  }
+  onWifiDeviceChanged: root.syncScanner()
+
+  // scannerEnabled lives on the shared device. Track the one this overlay
+  // switched on so it is the one switched off again, even if the device
+  // changes underneath.
+  property var scannerDevice: null
+
+  function syncScanner() {
+    var next = root.networkTabActive ? root.wifiDevice : null
+    if (root.scannerDevice && root.scannerDevice !== next) root.scannerDevice.scannerEnabled = false
+    root.scannerDevice = next
+    if (next) next.scannerEnabled = true
+  }
+
+  Component.onDestruction: {
+    if (root.scannerDevice) root.scannerDevice.scannerEnabled = false
+    if (root.owesDiscoveryStop && root.btAdapter && root.btAdapter.discovering) root.btAdapter.discovering = false
+  }
+
+  // Toggling the scanner off and on asks NetworkManager for a fresh scan.
+  function rescanWifi() {
+    if (!root.scannerDevice) return
+    root.wifiScanning = true
+    root.scannerDevice.scannerEnabled = false
+    wifiRescan.restart()
+  }
+
+  Timer {
+    id: wifiRescan
+    interval: 100
+    onTriggered: {
+      root.syncScanner()
+      wifiScanDone.restart()
+    }
+  }
+
+  Timer {
+    id: wifiScanDone
+    interval: 2500
+    onTriggered: root.wifiScanning = false
+  }
+
+  function toggleWifi() {
+    Networking.wifiEnabled = !Networking.wifiEnabled
+  }
+
+  function networkForSsid(ssid) {
+    for (var i = 0; i < root.wifiNetworkObjects.length; i++) {
+      var n = root.wifiNetworkObjects[i]
+      if (n && n.name === ssid) return n
+    }
+    return null
+  }
+
+  function wifiRequiresCredentials(security) {
+    return NetModel.requiresCredentials(security, WifiSecurityType.Open, WifiSecurityType.Owe)
+  }
+
+  function wifiIsEnterprise(security) {
+    return security === WifiSecurityType.Wpa2Eap || security === WifiSecurityType.WpaEap
+  }
+
+  function runWifiAction(kind, ssid, callback) {
+    var network = root.networkForSsid(ssid)
+    if (root.wifiBusy || !network) return
+    root.wifiActionNetwork = network
+    root.wifiActionSsid = ssid
+    root.wifiActionKind = kind
+    root.wifiFailureSsid = ""
+    root.wifiFailureReason = ""
+    callback(network)
+    // Outlasts NetworkManager's 25s supplicant timeout, so a wrong saved
+    // passphrase still reports as such rather than as a timeout.
+    wifiActionTimeout.restart()
+  }
+
+  function finishWifiAction() {
+    wifiActionTimeout.stop()
+    if (root.wifiActionKind === "connect") root.cancelPasswordPrompt()
+    root.wifiActionNetwork = null
+    root.wifiActionSsid = ""
+    root.wifiActionKind = ""
+    root.refreshNetwork()
+  }
+
+  function failWifiAction(reason) {
+    wifiActionTimeout.stop()
+    var network = root.wifiActionNetwork
+    var needsCredentials = network ? root.wifiRequiresCredentials(network.security) : false
+    var reasons = {
+      NoSecrets: ConnectionFailReason.NoSecrets,
+      WifiAuthTimeout: ConnectionFailReason.WifiAuthTimeout,
+      WifiNetworkLost: ConnectionFailReason.WifiNetworkLost,
+      WifiClientDisconnected: ConnectionFailReason.WifiClientDisconnected,
+      WifiClientFailed: ConnectionFailReason.WifiClientFailed
+    }
+    root.wifiFailureSsid = root.wifiActionSsid
+    root.wifiFailureReason = NetModel.networkFailureReason(reason, needsCredentials, reasons)
+    if (network && NetModel.shouldRepromptPassphrase(reason, needsCredentials, reasons))
+      root.openPasswordPrompt(root.wifiActionSsid, root.wifiIsEnterprise(network.security))
+    root.wifiActionNetwork = null
+    root.wifiActionSsid = ""
+    root.wifiActionKind = ""
+  }
+
+  function checkWifiAction() {
+    var n = root.wifiActionNetwork
+    if (!n) return
+    if (root.wifiActionKind === "connect" && n.connected) root.finishWifiAction()
+    else if (root.wifiActionKind === "disconnect" && !n.connected && !n.stateChanging) root.finishWifiAction()
+    else if (root.wifiActionKind === "forget" && !n.known && !n.stateChanging) root.finishWifiAction()
+  }
+
+  Connections {
+    target: root.wifiActionNetwork
+    ignoreUnknownSignals: true
+    function onConnectionFailed(reason) { root.failWifiAction(reason) }
+    function onConnectedChanged() { root.checkWifiAction() }
+    function onKnownChanged() { root.checkWifiAction() }
+    function onStateChangingChanged() { root.checkWifiAction() }
+  }
+
+  Timer {
+    id: wifiActionTimeout
+    interval: 30000
+    onTriggered: {
+      if (!root.wifiActionKind) return
+      root.wifiFailureSsid = root.wifiActionSsid
+      root.wifiFailureReason = root.wifiActionKind === "connect" ? "Timed out connecting"
+        : root.wifiActionKind === "disconnect" ? "Timed out disconnecting" : "Timed out forgetting"
+      root.wifiActionNetwork = null
+      root.wifiActionSsid = ""
+      root.wifiActionKind = ""
+    }
+  }
+
+  // A click on a row: disconnect the live network, join a saved or open one
+  // directly, and ask for credentials for anything else.
+  function activateWifiRow(row) {
+    if (!row || root.wifiBusy) return
+    if (row.connected) {
+      root.runWifiAction("disconnect", row.ssid, function(n) { n.disconnect() })
+    } else if (row.known || !root.wifiRequiresCredentials(row.security)) {
+      root.cancelPasswordPrompt()
+      root.runWifiAction("connect", row.ssid, function(n) { n.connect() })
+    } else {
+      root.openPasswordPrompt(row.ssid, root.wifiIsEnterprise(row.security))
+    }
+  }
+
+  function forgetWifiRow(row) {
+    if (!row || !NetModel.canForgetNetwork(row)) return
+    root.runWifiAction("forget", row.ssid, function(n) { n.forget() })
+  }
+
+  function openPasswordPrompt(ssid, enterprise) {
+    root.passwordSsid = ssid
+    root.passwordEnterprise = !!enterprise
+    passwordField.text = ""
+    identityField.text = ""
+    Qt.callLater(function() {
+      if (root.passwordEnterprise) identityField.forceActiveFocus()
+      else passwordField.forceActiveFocus()
+    })
+  }
+
+  function cancelPasswordPrompt() {
+    if (root.passwordSsid === "") return
+    root.passwordSsid = ""
+    passwordField.text = ""
+    identityField.text = ""
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function submitPassword() {
+    var ssid = root.passwordSsid
+    var secret = passwordField.text
+    if (!ssid || secret === "") return
+    if (root.passwordEnterprise) {
+      var identity = identityField.text
+      if (identity === "") return
+      root.runWifiAction("connect", ssid, function(n) {
+        enterpriseConnect.secret = secret
+        enterpriseConnect.command = ["bash", "-c", NetModel.enterpriseConnectScript, "nmcli-eap", ssid, identity]
+        enterpriseConnect.running = true
+      })
+    } else {
+      root.runWifiAction("connect", ssid, function(n) { n.connectWithPsk(secret) })
+    }
+    passwordField.text = ""
+  }
+
+  // The password reaches nmcli over stdin, never argv (see enterpriseConnectScript).
+  Process {
+    id: enterpriseConnect
+    property string secret: ""
+    stdinEnabled: true
+    onStarted: {
+      write(secret + "\n")
+      secret = ""
+    }
+  }
+
+  function wifiRowSubtitle(row) {
+    if (root.wifiActionSsid !== "" && row.ssid === root.wifiActionSsid) {
+      if (root.wifiActionKind === "connect") return "Connecting…"
+      if (root.wifiActionKind === "disconnect") return "Disconnecting…"
+      return "Forgetting…"
+    }
+    if (root.wifiFailureSsid !== "" && row.ssid === root.wifiFailureSsid) return root.wifiFailureReason
+    var parts = []
+    if (row.connected) parts.push("Connected")
+    else if (row.known) parts.push("Saved")
+    if (root.wifiIsEnterprise(row.security)) parts.push("Enterprise")
+    else parts.push(root.wifiRequiresCredentials(row.security) ? "Secured" : "Open")
+    parts.push(row.signal + "%")
+    return parts.join(" · ")
+  }
+
+  // Custom opens the helper's interactive prompt in a terminal, the same as
+  // the network panel does.
+  function setDns(provider) {
+    if (!provider || dnsAction.running) return
+    if (provider === "Custom") {
+      Util.execDetached("roseshell-launch-floating-terminal-with-presentation " + Util.shellQuote("roseshell-dns Custom"))
+      root.dismiss()
+      return
+    }
+    root.pendingDnsProvider = provider
+    dnsAction.command = ["roseshell-dns", provider]
+    dnsAction.running = true
+  }
+
+  Process {
+    id: dnsAction
+    onExited: function(code) {
+      if (code === 0) root.dnsProvider = root.pendingDnsProvider
+      root.pendingDnsProvider = ""
+      if (!dnsProbe.running) dnsProbe.running = true
+    }
+  }
+
+  function netBandLabel(freq) {
+    return NetModel.formatHeaderFreq(freq).replace("ghz", " GHz")
+  }
+
+  readonly property var netDetailRows: {
+    var info = root.netInfo || {}
+    if (!info.iface) return []
+    var rows = [
+      { label: "Connection", value: info.type === "wifi" ? (info.ssid || "Wi-Fi") : info.type === "ethernet" ? "Ethernet" : info.type || info.iface },
+      { label: "Interface", value: info.iface },
+      { label: "IP address", value: info.ip ? info.ip + (info.prefix ? "/" + info.prefix : "") : "—" },
+      { label: "Gateway", value: info.gateway || "—" }
+    ]
+    if (info.type === "wifi") {
+      var link = []
+      if (info.freq) link.push(root.netBandLabel(info.freq))
+      if (info.signal_dbm) link.push(info.signal_dbm + " dBm")
+      if (parseFloat(info.bitrate) > 0) link.push(Math.round(parseFloat(info.bitrate)) + " Mbit/s")
+      rows.push({ label: "Link", value: link.join(" · ") || "—" })
+    } else if (info.speed) {
+      rows.push({ label: "Link", value: NetModel.formatHeaderSpeed(info.speed).replace("mbit", " Mbit/s").replace("gbit", " Gbit/s") })
+    }
+    if (info.internet_ping_ms !== undefined) rows.push({ label: "Latency", value: NetModel.formatPingLatency(info.internet_ping_ms) })
+    return rows
+  }
+
+  // ============================================================ bluetooth
+
+  readonly property bool bluetoothTabActive: root.opened && root.activeTab === "bluetooth"
+  readonly property var btAdapter: Bluetooth.defaultAdapter
+  readonly property bool btEnabled: !!(root.btAdapter && root.btAdapter.enabled)
+  readonly property var btDeviceObjects: Bluetooth.devices ? Bluetooth.devices.values : []
+  readonly property var btGroups: BtModel.deviceLists(root.btDeviceObjects)
+
+  // Address -> connecting | disconnecting | forgetting, until BlueZ catches up.
+  property var btPending: ({})
+
+  function btRow(d) {
+    return {
+      address: d.address || "",
+      label: BtModel.deviceLabel(d),
+      connected: !!d.connected,
+      paired: !!(d.paired || d.bonded || d.trusted),
+      batteryAvailable: !!d.batteryAvailable,
+      battery: d.battery !== undefined ? d.battery : 0,
+      icon: String(d.icon || "")
+    }
+  }
+
+  readonly property var btPairedRows: {
+    var rows = []
+    var groups = root.btGroups
+    for (var i = 0; i < groups.connected.length; i++) rows.push(root.btRow(groups.connected[i]))
+    for (var j = 0; j < groups.known.length; j++) rows.push(root.btRow(groups.known[j]))
+    return rows
+  }
+
+  readonly property var btAvailableRows: {
+    var rows = []
+    var groups = root.btGroups
+    for (var i = 0; i < groups.discovered.length; i++) rows.push(root.btRow(groups.discovered[i]))
+    return rows
+  }
+
+  function btDeviceGlyph(icon) {
+    if (icon.indexOf("headset") !== -1 || icon.indexOf("headphone") !== -1) return "󰋋"
+    if (icon.indexOf("audio") !== -1 || icon.indexOf("speaker") !== -1) return "󰓃"
+    if (icon.indexOf("keyboard") !== -1) return "󰌌"
+    if (icon.indexOf("mouse") !== -1) return "󰍽"
+    if (icon.indexOf("gaming") !== -1) return "󰊴"
+    if (icon.indexOf("phone") !== -1) return "󰏲"
+    if (icon.indexOf("computer") !== -1) return "󰟀"
+    return "󰂯"
+  }
+
+  function btRowSubtitle(row) {
+    var pending = BtModel.pendingAction(root.btPending, row.address)
+    if (pending === "connecting") return row.paired ? "Connecting…" : "Pairing…"
+    if (pending === "disconnecting") return "Disconnecting…"
+    if (pending === "forgetting") return "Forgetting…"
+    var parts = [row.connected ? "Connected" : row.paired ? "Paired" : "Not paired"]
+    if (row.batteryAvailable) parts.push("Battery " + Math.round(row.battery * 100) + "%")
+    return parts.join(" · ")
+  }
+
+  function toggleBluetooth() {
+    if (!root.btAdapter) return
+    Util.execArgv(["roseshell-bluetooth-power", root.btAdapter.enabled ? "off" : "on"])
+  }
+
+  function toggleDiscoverable() {
+    if (!root.btAdapter || !root.btAdapter.enabled) return
+    root.btAdapter.discoverable = !root.btAdapter.discoverable
+  }
+
+  function btAction(row, action, pending) {
+    if (!row || !row.address || BtModel.pendingAction(root.btPending, row.address)) return
+    root.btPending = BtModel.withPendingAction(root.btPending, row.address, pending)
+    btPendingTimeout.restart()
+    Util.execArgv(["roseshell-bluetooth-device", action, row.address])
+  }
+
+  function activateBtRow(row) {
+    if (row.connected) root.btAction(row, "disconnect", "disconnecting")
+    else root.btAction(row, row.paired ? "connect" : "pair", "connecting")
+  }
+
+  // Drops pending labels once BlueZ reports the outcome. A binding, so any
+  // device's state change re-runs it.
+  readonly property int btPendingSettled: {
+    var pending = root.btPending
+    var devices = root.btDeviceObjects
+    var next = BtModel.cloneMap(pending)
+    var changed = false
+    for (var address in pending) {
+      var found = null
+      for (var i = 0; i < devices.length; i++) if (devices[i] && devices[i].address === address) { found = devices[i]; break }
+      var action = pending[address]
+      var paired = found && (found.paired || found.bonded || found.trusted)
+      if ((action === "connecting" && found && found.connected)
+          || (action === "disconnecting" && found && !found.connected)
+          || (action === "forgetting" && !paired)) {
+        delete next[address]
+        changed = true
+      }
+    }
+    if (changed) Qt.callLater(function() { root.btPending = next })
+    return changed ? 1 : 0
+  }
+
+  Timer {
+    id: btPendingTimeout
+    interval: 20000
+    onTriggered: root.btPending = ({})
+  }
+
+  // Scans only while the tab is on screen. As in the bluetooth panel, BlueZ
+  // refuses StartDiscovery while the adapter powers up and drops it on its own
+  // timeout, so keep nudging it; and stop it afterwards, since a session left
+  // running starves Bluetooth audio on the same controller.
+  property bool owesDiscoveryStop: false
+
+  Timer {
+    interval: 1000
+    repeat: true
+    triggeredOnStart: true
+    running: root.bluetoothTabActive && root.btEnabled && !root.btAdapter.discovering
+    onTriggered: {
+      root.owesDiscoveryStop = true
+      root.btAdapter.discovering = true
+    }
+  }
+
+  Timer {
+    id: discoveryStop
+    interval: 1000
+    repeat: true
+    property int attempts: 0
+    running: !root.bluetoothTabActive && root.owesDiscoveryStop && root.btAdapter !== null && root.btAdapter.discovering === true
+    onRunningChanged: if (running) attempts = 0
+    onTriggered: {
+      attempts += 1
+      if (attempts > 3) { root.owesDiscoveryStop = false; return }
+      root.btAdapter.discovering = false
+    }
+  }
+
+  Connections {
+    target: root.btAdapter
+    function onDiscoveringChanged() {
+      if (!root.btAdapter.discovering) root.owesDiscoveryStop = false
+    }
+  }
+
   // ============================================================ plugins
 
   property var pluginList: []
@@ -964,6 +1464,7 @@ Item {
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
             if (root.confirmDeleteOpen) root.cancelDeletePlugin()
+            else if (root.passwordSsid !== "") root.cancelPasswordPrompt()
             else root.dismiss()
             event.accepted = true
           }
@@ -998,6 +1499,8 @@ Item {
               { id: "appearance", label: "Appearance", icon: "󰏘" },
               { id: "shell", label: "Shell", icon: "󰍹" },
               { id: "windows", label: "Windows", icon: "󰖯" },
+              { id: "network", label: "Network", icon: "󰖩" },
+              { id: "bluetooth", label: "Bluetooth", icon: "󰂯" },
               { id: "plugins", label: "Plugins", icon: "󰐱" }
             ]
 
@@ -1606,6 +2109,497 @@ Item {
                 color: Qt.darker(root.foreground, 1.6)
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
+              }
+            }
+          }
+        }
+
+        // ---------------------------------------------------- network tab
+
+        Column {
+          width: parent.width
+          spacing: Style.spacing.md
+          visible: root.activeTab === "network"
+
+          SettingsCard {
+            SettingRow {
+              icon: !root.wifiDevice ? "󰤮" : !Networking.wifiEnabled ? "󰤭"
+                : root.connectedWifiRow ? NetModel.wifiIconFor(root.connectedWifiRow.signal) : "󰤯"
+              title: "Wi-Fi"
+              subtitle: !root.networkManagerAvailable ? "NetworkManager isn't running"
+                : !root.wifiDevice ? "No Wi-Fi adapter"
+                : !Networking.wifiEnabled ? "Off"
+                : root.connectedWifiRow ? "Connected to " + root.connectedWifiRow.ssid
+                : "Not connected"
+
+              PillSwitch {
+                visible: root.networkManagerAvailable && !!root.wifiDevice
+                checked: Networking.wifiEnabled
+                onToggled: root.toggleWifi()
+              }
+            }
+
+            PanelSeparator {
+              visible: root.netDetailRows.length > 0
+              foreground: root.foreground
+              strength: 0.08
+            }
+
+            Grid {
+              visible: root.netDetailRows.length > 0
+              width: parent.width
+              columns: 2
+              columnSpacing: Style.spacing.xl
+              rowSpacing: Style.spacing.xs
+
+              Repeater {
+                model: root.netDetailRows
+
+                delegate: Row {
+                  required property var modelData
+                  width: (parent.width - Style.spacing.xl) / 2
+                  spacing: Style.spacing.md
+
+                  Text {
+                    id: detailLabel
+                    width: Style.space(76)
+                    textFormat: Text.PlainText
+                    text: modelData.label
+                    color: Qt.darker(root.foreground, 1.6)
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  Text {
+                    width: parent.width - detailLabel.width - parent.spacing
+                    textFormat: Text.PlainText
+                    text: modelData.value
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
+                }
+              }
+            }
+          }
+
+          // Passphrase prompt for the network picked below. Kept out of the
+          // list, which rebuilds as scans land and would drop what's typed.
+          SettingsCard {
+            visible: root.passwordSsid !== ""
+            contentSpacing: Style.spacing.md
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: "Join “" + root.passwordSsid + "”"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+              elide: Text.ElideRight
+            }
+
+            TextField {
+              id: identityField
+              visible: root.passwordEnterprise
+              width: parent.width
+              placeholderText: "Username"
+              foreground: root.foreground
+              accent: Color.accent
+              Keys.onEscapePressed: root.cancelPasswordPrompt()
+              onAccepted: passwordField.forceActiveFocus()
+            }
+
+            TextField {
+              id: passwordField
+              width: parent.width
+              password: true
+              placeholderText: "Password"
+              foreground: root.foreground
+              accent: Color.accent
+              Keys.onEscapePressed: root.cancelPasswordPrompt()
+              onAccepted: root.submitPassword()
+            }
+
+            Row {
+              anchors.right: parent.right
+              spacing: Style.spacing.md
+
+              Button {
+                text: "Cancel"
+                bordered: true
+                foreground: root.foreground
+                accent: Color.accent
+                fontFamily: root.fontFamily
+                onClicked: root.cancelPasswordPrompt()
+              }
+
+              Button {
+                text: root.wifiBusy && root.wifiActionSsid === root.passwordSsid ? "Joining…" : "Join"
+                bordered: true
+                selected: true
+                foreground: root.foreground
+                accent: Color.accent
+                fontFamily: root.fontFamily
+                enabled: !root.wifiBusy
+                onClicked: root.submitPassword()
+              }
+            }
+          }
+
+          Item { width: 1; height: Style.spacing.xs; visible: root.wifiDevice !== null && Networking.wifiEnabled }
+
+          Item {
+            width: parent.width
+            height: networksHeader.implicitHeight
+            visible: root.wifiDevice !== null && Networking.wifiEnabled
+
+            PanelSectionHeader {
+              id: networksHeader
+              text: "NETWORKS"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Text {
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              textFormat: Text.PlainText
+              text: root.wifiScanning ? "Scanning…" : "󰑐  Rescan"
+              color: rescanMouse.containsMouse ? Color.accent : Qt.darker(root.foreground, 1.4)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+
+              MouseArea {
+                id: rescanMouse
+                anchors.fill: parent
+                anchors.margins: -Style.spacing.xs
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: if (!root.wifiScanning) root.rescanWifi()
+              }
+            }
+          }
+
+          Text {
+            visible: root.wifiDevice !== null && Networking.wifiEnabled && root.wifiRows.length === 0
+            textFormat: Text.PlainText
+            text: "Looking for networks…"
+            color: Qt.darker(root.foreground, 1.6)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+          }
+
+          SettingsCard {
+            visible: root.wifiDevice !== null && Networking.wifiEnabled && root.wifiRows.length > 0
+            contentSpacing: 0
+
+            ListView {
+              id: wifiListView
+              readonly property int rowHeight: Style.space(46)
+              width: parent.width
+              height: Math.min(root.wifiRows.length, root.passwordSsid !== "" ? 4 : 6) * rowHeight
+              clip: true
+              model: root.wifiRows
+              boundsBehavior: Flickable.StopAtBounds
+
+              delegate: Item {
+                id: wifiRow
+                required property var modelData
+                required property int index
+                readonly property var net: modelData
+                readonly property bool canForget: NetModel.canForgetNetwork(net)
+                readonly property bool thisBusy: root.wifiActionSsid !== "" && root.wifiActionSsid === net.ssid
+
+                width: ListView.view.width
+                height: wifiListView.rowHeight
+
+                Rectangle {
+                  visible: wifiRow.index > 0
+                  width: parent.width
+                  height: 1
+                  color: Util.alpha(root.foreground, 0.07)
+                }
+
+                MouseArea {
+                  id: wifiRowMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: root.wifiBusy ? Qt.ArrowCursor : Qt.PointingHandCursor
+                  onClicked: root.activateWifiRow(wifiRow.net)
+                }
+
+                SettingRow {
+                  anchors.verticalCenter: parent.verticalCenter
+                  icon: NetModel.wifiIconFor(wifiRow.net.signal)
+                  title: wifiRow.net.ssid
+                  subtitle: root.wifiRowSubtitle(wifiRow.net)
+                  opacity: root.wifiBusy && !wifiRow.thisBusy ? 0.6 : 1
+
+                  Row {
+                    spacing: Style.spacing.lg
+
+                    Text {
+                      visible: wifiRow.canForget && (wifiRowMouse.containsMouse || forgetMouse.containsMouse)
+                      width: visible ? implicitWidth : 0
+                      anchors.verticalCenter: parent.verticalCenter
+                      textFormat: Text.PlainText
+                      text: "󰩹"
+                      color: forgetMouse.containsMouse ? "#e06c75" : Qt.darker(root.foreground, 1.6)
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.icon
+
+                      MouseArea {
+                        id: forgetMouse
+                        anchors.fill: parent
+                        anchors.margins: -Style.spacing.xs
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.forgetWifiRow(wifiRow.net)
+                      }
+                    }
+
+                    Text {
+                      visible: !wifiRow.net.connected && !wifiRow.net.known && root.wifiRequiresCredentials(wifiRow.net.security)
+                      anchors.verticalCenter: parent.verticalCenter
+                      textFormat: Text.PlainText
+                      text: "󰌾"
+                      color: Qt.darker(root.foreground, 1.6)
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.icon
+                    }
+
+                    Button {
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: wifiRow.net.connected ? "Disconnect" : "Connect"
+                      bordered: true
+                      selected: wifiRow.net.connected
+                      verticalPadding: Style.spacing.xs
+                      fontSize: Style.font.caption
+                      foreground: root.foreground
+                      accent: Color.accent
+                      fontFamily: root.fontFamily
+                      enabled: !root.wifiBusy
+                      onClicked: root.activateWifiRow(wifiRow.net)
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          Item { width: 1; height: Style.spacing.xs }
+
+          PanelSectionHeader {
+            text: "DNS"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          SettingsCard {
+            contentSpacing: Style.spacing.md
+
+            ButtonGroup {
+              value: root.pendingDnsProvider || root.dnsProvider
+              foreground: root.foreground
+              accent: Color.accent
+              fontFamily: root.fontFamily
+              options: [
+                { value: "DHCP", label: "Automatic" },
+                { value: "Cloudflare", label: "Cloudflare" },
+                { value: "Google", label: "Google" },
+                { value: "Custom", label: "Custom…" }
+              ]
+              onChanged: function(v) { root.setDns(v) }
+            }
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              wrapMode: Text.WordWrap
+              text: dnsAction.running ? "Switching DNS…"
+                : root.dnsProvider === "DHCP" ? "Uses whatever DNS the network hands out."
+                : root.dnsProvider === "Custom" ? "Using your own DNS servers."
+                : "All lookups go to " + root.dnsProvider + ", whatever network you're on."
+              color: Qt.darker(root.foreground, 1.6)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
+
+        // ---------------------------------------------------- bluetooth tab
+
+        Column {
+          width: parent.width
+          spacing: Style.spacing.md
+          visible: root.activeTab === "bluetooth"
+
+          SettingsCard {
+            SettingRow {
+              icon: !root.btAdapter ? "󰂲" : !root.btEnabled ? "󰂲" : root.btGroups.connected.length > 0 ? "󰂱" : "󰂯"
+              title: "Bluetooth"
+              subtitle: !root.btAdapter ? "No Bluetooth adapter"
+                : !root.btEnabled ? "Off"
+                : root.btGroups.connected.length === 1 ? "Connected to " + BtModel.deviceLabel(root.btGroups.connected[0])
+                : root.btGroups.connected.length > 1 ? root.btGroups.connected.length + " devices connected"
+                : "On · " + (root.btAdapter.name || "no devices connected")
+
+              PillSwitch {
+                visible: !!root.btAdapter
+                checked: root.btEnabled
+                onToggled: root.toggleBluetooth()
+              }
+            }
+
+            SettingRow {
+              visible: root.btEnabled
+              icon: "󰈈"
+              title: "Discoverable"
+              subtitle: root.btAdapter && root.btAdapter.discoverable
+                ? "Visible to nearby devices as “" + (root.btAdapter.name || "this computer") + "”"
+                : "Hidden from nearby devices"
+
+              PillSwitch {
+                checked: !!(root.btAdapter && root.btAdapter.discoverable)
+                onToggled: root.toggleDiscoverable()
+              }
+            }
+          }
+
+          Repeater {
+            model: root.btEnabled ? [
+              { key: "paired", title: "MY DEVICES", empty: "No paired devices yet" },
+              { key: "available", title: "AVAILABLE", empty: "Searching for devices…" }
+            ] : []
+
+            delegate: Column {
+              id: btSection
+              required property var modelData
+              readonly property var rows: modelData.key === "paired" ? root.btPairedRows : root.btAvailableRows
+              width: parent.width
+              spacing: Style.spacing.md
+
+              Item { width: 1; height: Style.spacing.xs }
+
+              Item {
+                width: parent.width
+                height: btSectionHeader.implicitHeight
+
+                PanelSectionHeader {
+                  id: btSectionHeader
+                  text: btSection.modelData.title
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                }
+
+                Text {
+                  visible: btSection.modelData.key === "available" && root.btAdapter && root.btAdapter.discovering
+                  anchors.right: parent.right
+                  anchors.bottom: parent.bottom
+                  textFormat: Text.PlainText
+                  text: "Scanning…"
+                  color: Qt.darker(root.foreground, 1.6)
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+
+              Text {
+                visible: btSection.rows.length === 0
+                textFormat: Text.PlainText
+                text: btSection.modelData.empty
+                color: Qt.darker(root.foreground, 1.6)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+              }
+
+              SettingsCard {
+                visible: btSection.rows.length > 0
+                contentSpacing: 0
+
+                ListView {
+                  id: btListView
+                  readonly property int rowHeight: Style.space(46)
+                  width: parent.width
+                  height: Math.min(btSection.rows.length, btSection.modelData.key === "paired" ? 4 : 5) * rowHeight
+                  clip: true
+                  model: btSection.rows
+                  boundsBehavior: Flickable.StopAtBounds
+
+                  delegate: Item {
+                    id: btRowItem
+                    required property var modelData
+                    required property int index
+                    readonly property var dev: modelData
+                    readonly property string pending: BtModel.pendingAction(root.btPending, dev.address)
+
+                    width: ListView.view.width
+                    height: btListView.rowHeight
+
+                    Rectangle {
+                      visible: btRowItem.index > 0
+                      width: parent.width
+                      height: 1
+                      color: Util.alpha(root.foreground, 0.07)
+                    }
+
+                    MouseArea {
+                      id: btRowMouse
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.activateBtRow(btRowItem.dev)
+                    }
+
+                    SettingRow {
+                      anchors.verticalCenter: parent.verticalCenter
+                      icon: root.btDeviceGlyph(btRowItem.dev.icon)
+                      title: btRowItem.dev.label
+                      subtitle: root.btRowSubtitle(btRowItem.dev)
+
+                      Row {
+                        spacing: Style.spacing.lg
+
+                        Text {
+                          visible: btRowItem.dev.paired && (btRowMouse.containsMouse || btForgetMouse.containsMouse)
+                          width: visible ? implicitWidth : 0
+                          anchors.verticalCenter: parent.verticalCenter
+                          textFormat: Text.PlainText
+                          text: "󰩹"
+                          color: btForgetMouse.containsMouse ? "#e06c75" : Qt.darker(root.foreground, 1.6)
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.icon
+
+                          MouseArea {
+                            id: btForgetMouse
+                            anchors.fill: parent
+                            anchors.margins: -Style.spacing.xs
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.btAction(btRowItem.dev, "forget", "forgetting")
+                          }
+                        }
+
+                        Button {
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: btRowItem.dev.connected ? "Disconnect" : btRowItem.dev.paired ? "Connect" : "Pair"
+                          bordered: true
+                          selected: btRowItem.dev.connected
+                          verticalPadding: Style.spacing.xs
+                          fontSize: Style.font.caption
+                          foreground: root.foreground
+                          accent: Color.accent
+                          fontFamily: root.fontFamily
+                          enabled: btRowItem.pending === ""
+                          onClicked: root.activateBtRow(btRowItem.dev)
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
