@@ -508,6 +508,16 @@ QtObject {
     onLoadFailed: refreshTimer.restart()
   }
 
+  // The Settings overlay's window gaps (roseshell-window-style) land here.
+  property FileView windowStyleFile: FileView {
+    path: Quickshell.env("HOME") + "/.local/state/roseshell/window-style.lua"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: refreshTimer.restart()
+    onLoaded: refreshTimer.restart()
+    onLoadFailed: refreshTimer.restart()
+  }
+
   Component.onCompleted: {
     refresh()
     resolveFontFamily()

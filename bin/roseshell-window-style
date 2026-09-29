@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# roseshell:summary=Set Hyprland window appearance (rounding, gaps, borders, shadows, animations)
+# roseshell:args=<rounding> <gaps-in> <gaps-out> <border> <shadow on|off> <animations off|minimal|full>
+# roseshell:examples=roseshell window-style 8 4 8 2 on full
+
+# The Settings overlay's Windows tab calls this. Like roseshell-bar-blur, the
+# values go in a small Lua file that hyprland.lua loads after its own look and
+# feel section, so they survive a Hyprland reload, and are applied to the
+# running session right away.
+
+STATE_FILE="$HOME/.local/state/roseshell/window-style.lua"
+
+usage() {
+  echo "Usage: roseshell-window-style <rounding> <gaps-in> <gaps-out> <border> <shadow on|off> <animations off|minimal|full>" >&2
+  exit 1
+}
+
+(( $# == 6 )) || usage
+
+rounding=$1 gaps_in=$2 gaps_out=$3 border=$4
+for n in "$rounding" "$gaps_in" "$gaps_out" "$border"; do
+  [[ $n =~ ^[0-9]+$ ]] || usage
+done
+(( rounding > 30 )) && rounding=30
+(( gaps_in > 30 )) && gaps_in=30
+(( gaps_out > 60 )) && gaps_out=60
+(( border > 8 )) && border=8
+
+case "$5" in
+  on) shadow=true ;;
+  off) shadow=false ;;
+  *) usage ;;
+esac
+
+# minimal is hyprland.lua's own default: everything still except a quick
+# slide on workspace switch. Leaves "full" overrides (windows, fade) are
+# switched off explicitly, since turning global off doesn't reach them.
+case "$6" in
+  off)
+    animations='hl.animation({ leaf = "global", enabled = false })
+hl.animation({ leaf = "windows", enabled = false })
+hl.animation({ leaf = "fade", enabled = false })
+hl.animation({ leaf = "workspaces", enabled = false })'
+    ;;
+  minimal)
+    animations='hl.animation({ leaf = "global", enabled = false })
+hl.animation({ leaf = "windows", enabled = false })
+hl.animation({ leaf = "fade", enabled = false })
+hl.animation({ leaf = "workspaces", enabled = true, speed = 1.5, bezier = "wsOut", style = "slidefade 15%" })'
+    ;;
+  full)
+    animations='hl.curve("rsEase", { type = "bezier", points = { {0.05, 0.9}, {0.1, 1.0} } })
+hl.animation({ leaf = "global", enabled = true, speed = 4, bezier = "rsEase" })
+hl.animation({ leaf = "windows", enabled = true, speed = 4, bezier = "rsEase", style = "popin 85%" })
+hl.animation({ leaf = "fade", enabled = true, speed = 3, bezier = "rsEase" })
+hl.animation({ leaf = "workspaces", enabled = true, speed = 3, bezier = "wsOut", style = "slidefade 15%" })'
+    ;;
+  *) usage ;;
+esac
+
+lua="hl.config({
+  general = { gaps_in = $gaps_in, gaps_out = $gaps_out, border_size = $border },
+  decoration = {
+    rounding = $rounding,
+    shadow = { enabled = $shadow, range = 14, render_power = 3, color = \"rgba(00000066)\" },
+  },
+})
+$animations"
+
+mkdir -p "${STATE_FILE%/*}"
+printf -- '-- Written by roseshell-window-style; loaded from hyprland.lua.\n%s\n' "$lua" >"$STATE_FILE.new" &&
+  mv "$STATE_FILE.new" "$STATE_FILE"
+
+hyprctl eval "$lua" >/dev/null

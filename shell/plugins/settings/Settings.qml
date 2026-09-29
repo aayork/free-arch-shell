@@ -31,13 +31,13 @@ Item {
   property int cardWidth: Math.min(Style.space(560), panel.width - Style.gapsOut * 2)
   property int cardMaxHeight: Math.max(Style.space(300), panel.height - Style.gapsOut * 6)
 
-  property string activeTab: "appearance" // appearance | shell | plugins
+  property string activeTab: "appearance" // appearance | shell | windows | plugins
 
   function open(payloadJson) {
     root.opened = true
     var payload = {}
     try { payload = JSON.parse(payloadJson || "{}") || {} } catch (e) {}
-    root.activeTab = ["appearance", "shell", "plugins"].indexOf(payload.tab) !== -1 ? payload.tab : "appearance"
+    root.activeTab = ["appearance", "shell", "windows", "plugins"].indexOf(payload.tab) !== -1 ? payload.tab : "appearance"
     root.refreshAll()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
@@ -382,6 +382,15 @@ Item {
   property int glassBlurSize: 8
   property int glassBlurPasses: 2
 
+  // Hyprland window appearance, kept in shell.json `windows` and applied by
+  // roseshell-window-style. Defaults match hyprland.lua's own look and feel.
+  property int windowRounding: 0
+  property int windowGapsIn: 2
+  property int windowGapsOut: 4
+  property int windowBorder: 1
+  property bool windowShadow: false
+  property string windowAnimations: "minimal"
+
   property bool nightlightEnabled: false
   property bool nightlightLoaded: false
   property int nightTemperature: 4000
@@ -411,6 +420,14 @@ Item {
       root.glassBlur = glass.blur === true
       root.glassBlurSize = Number(glass.blurSize) > 0 ? Math.round(glass.blurSize) : 8
       root.glassBlurPasses = Number(glass.blurPasses) > 0 ? Math.round(glass.blurPasses) : 2
+      var win = (cfg && cfg.windows) || {}
+      function whole(v, fallback) { var n = Number(v); return isFinite(n) && n >= 0 ? Math.round(n) : fallback }
+      root.windowRounding = whole(win.rounding, 0)
+      root.windowGapsIn = whole(win.gapsIn, 2)
+      root.windowGapsOut = whole(win.gapsOut, 4)
+      root.windowBorder = whole(win.border, 1)
+      root.windowShadow = win.shadow === true
+      root.windowAnimations = ["off", "minimal", "full"].indexOf(win.animations) !== -1 ? win.animations : "minimal"
     } catch (e) {}
   }
 
@@ -508,6 +525,25 @@ Item {
   function applyBlur() {
     var on = root.barTransparent && root.glassBlur
     Util.execDetached("roseshell-bar-blur " + (on ? "on" : "off") + " " + root.glassBlurSize + " " + root.glassBlurPasses)
+  }
+
+  // Takes the changed fields, keeps the rest, saves and applies all of them:
+  // the script always writes the whole window-style file.
+  function setWindowStyle(changes) {
+    var next = {
+      rounding: root.windowRounding, gapsIn: root.windowGapsIn, gapsOut: root.windowGapsOut,
+      border: root.windowBorder, shadow: root.windowShadow, animations: root.windowAnimations
+    }
+    for (var key in changes) next[key] = changes[key]
+    root.windowRounding = next.rounding
+    root.windowGapsIn = next.gapsIn
+    root.windowGapsOut = next.gapsOut
+    root.windowBorder = next.border
+    root.windowShadow = next.shadow
+    root.windowAnimations = next.animations
+    root.setConfigValue(["windows"], next)
+    Util.execArgv(["roseshell-window-style", String(next.rounding), String(next.gapsIn), String(next.gapsOut),
+      String(next.border), next.shadow ? "on" : "off", next.animations])
   }
 
   function toggleNightlight() {
@@ -961,6 +997,7 @@ Item {
             model: [
               { id: "appearance", label: "Appearance", icon: "󰏘" },
               { id: "shell", label: "Shell", icon: "󰍹" },
+              { id: "windows", label: "Windows", icon: "󰖯" },
               { id: "plugins", label: "Plugins", icon: "󰐱" }
             ]
 
@@ -1436,6 +1473,140 @@ Item {
               tickCount: 4
               value: root.glassBlurPasses
               onReleased: function(v) { root.setGlassBlur(true, root.glassBlurSize, Math.round(v)) }
+            }
+          }
+        }
+
+        // ---------------------------------------------------- windows tab
+
+        Column {
+          width: parent.width
+          spacing: Style.spacing.md
+          visible: root.activeTab === "windows"
+
+          PanelSectionHeader {
+            text: "SHAPE"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          SettingsCard {
+            LabeledSlider {
+              label: "Corner radius"
+              valueText: root.windowRounding === 0 ? "Square" : root.windowRounding + " px"
+              minLabel: "Square"
+              maxLabel: "Round"
+              minimum: 0
+              maximum: 20
+              integer: true
+              value: root.windowRounding
+              onReleased: function(v) { root.setWindowStyle({ rounding: Math.round(v) }) }
+            }
+
+            LabeledSlider {
+              label: "Border width"
+              valueText: root.windowBorder === 0 ? "None" : root.windowBorder + " px"
+              minLabel: "None"
+              maxLabel: "Thick"
+              minimum: 0
+              maximum: 5
+              integer: true
+              tickCount: 6
+              value: root.windowBorder
+              onReleased: function(v) { root.setWindowStyle({ border: Math.round(v) }) }
+            }
+
+            SettingRow {
+              icon: "󰘷"
+              title: "Window shadows"
+              subtitle: "A soft drop shadow under every window"
+
+              PillSwitch {
+                checked: root.windowShadow
+                onToggled: root.setWindowStyle({ shadow: !root.windowShadow })
+              }
+            }
+          }
+
+          Item { width: 1; height: Style.spacing.md }
+
+          PanelSectionHeader {
+            text: "SPACING"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          SettingsCard {
+            LabeledSlider {
+              label: "Gaps between windows"
+              valueText: root.windowGapsIn + " px"
+              minLabel: "Tight"
+              maxLabel: "Airy"
+              minimum: 0
+              maximum: 20
+              integer: true
+              value: root.windowGapsIn
+              onReleased: function(v) { root.setWindowStyle({ gapsIn: Math.round(v) }) }
+            }
+
+            LabeledSlider {
+              label: "Gaps around the screen edge"
+              valueText: root.windowGapsOut + " px"
+              minLabel: "Tight"
+              maxLabel: "Airy"
+              minimum: 0
+              maximum: 40
+              integer: true
+              value: root.windowGapsOut
+              onReleased: function(v) { root.setWindowStyle({ gapsOut: Math.round(v) }) }
+            }
+          }
+
+          Item { width: 1; height: Style.spacing.md }
+
+          PanelSectionHeader {
+            text: "MOTION"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          SettingsCard {
+            Column {
+              width: parent.width
+              spacing: Style.spacing.md
+
+              Text {
+                textFormat: Text.PlainText
+                text: "Animations"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+              }
+
+              ButtonGroup {
+                value: root.windowAnimations
+                foreground: root.foreground
+                accent: Color.accent
+                fontFamily: root.fontFamily
+                options: [
+                  { value: "off", label: "Off" },
+                  { value: "minimal", label: "Minimal" },
+                  { value: "full", label: "Full" }
+                ]
+                onChanged: function(v) { root.setWindowStyle({ animations: v }) }
+              }
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                text: root.windowAnimations === "off" ? "Everything changes instantly."
+                  : root.windowAnimations === "minimal" ? "Only a quick slide when switching workspaces."
+                  : "Windows pop in and fade, and workspaces slide."
+                color: Qt.darker(root.foreground, 1.6)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
             }
           }
         }
