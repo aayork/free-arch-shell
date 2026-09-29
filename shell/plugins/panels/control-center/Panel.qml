@@ -6,7 +6,7 @@ import qs.Commons
 import qs.Ui
 
 // GNOME-style quick settings. The bar button groups the network, Bluetooth,
-// and volume icons; the popup holds power actions, output/input volume, and
+// and volume icons; the popup holds now playing, output/input volume, and
 // rows that hand off to the full network, Bluetooth, and display panels.
 //
 // This plugin owns no audio/network/Bluetooth state of its own. It drives the
@@ -20,7 +20,6 @@ Panel {
   ipcTarget: "roseshell.control-center"
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
-  readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
@@ -66,37 +65,27 @@ Panel {
     return names.join(", ")
   }
 
-  // ---------------------------------------------------------------- power
-  // Destructive actions take a second click within confirmWindowMs; the icon
-  // turns urgent and its tooltip says what the next click will do.
-  readonly property int confirmWindowMs: 3000
-  property string confirming: ""
-  readonly property var powerActions: [
-    { id: "lock",     label: "Lock",      icon: "\udb80\udf3e", command: ["roseshell-system-lock"],   confirm: false },
-    { id: "suspend",  label: "Suspend",   icon: "󰒲", command: ["systemctl", "suspend"],     confirm: false },
-    { id: "logout",   label: "Log out",   icon: "󰍃", command: ["roseshell-system-logout"], confirm: true },
-    { id: "reboot",   label: "Restart",   icon: "󰜉", command: ["systemctl", "reboot"],      confirm: true },
-    { id: "shutdown", label: "Shut down", icon: "\udb81\udc25", command: ["systemctl", "poweroff"],    confirm: true }
-  ]
+  // ---------------------------------------------------------------- media
+  // State comes from the roseshell.media service, so this follows the same
+  // active player as the bar widget and the media keys.
+  readonly property var media: bar && bar.shell ? bar.shell.firstPartyServiceFor("roseshell.media") : null
+  readonly property var player: media ? media.activePlayer : null
+  readonly property bool hasMedia: !!(media && media.hasMedia)
+  readonly property bool showProgress: !!(player && player.positionSupported && player.lengthSupported && player.length > 0)
 
-  function triggerPower(action) {
-    if (action.confirm && confirming !== action.id) {
-      confirming = action.id
-      confirmTimer.restart()
-      return
-    }
-    confirming = ""
-    close()
-    Quickshell.execDetached(action.command)
+  function mediaAction(action) {
+    if (media) media.runAction(action, false, media.playerKey(player))
   }
 
+  // MPRIS doesn't push position updates; poll only while it's visible.
   Timer {
-    id: confirmTimer
-    interval: root.confirmWindowMs
-    onTriggered: root.confirming = ""
+    interval: 1000
+    repeat: true
+    running: root.opened && root.showProgress && root.player.isPlaying
+    onTriggered: root.player.positionChanged()
   }
 
-  onOpenedChanged: if (!opened) confirming = ""
+  onOpenedChanged: if (opened && showProgress) player.positionChanged()
 
   // ---------------------------------------------------------------- audio
   function nodeOptions(nodes) {
@@ -303,40 +292,104 @@ Panel {
         width: parent.width
         spacing: Style.space(12)
 
-        // Power / session actions, spread evenly across the panel width.
         PanelSectionHeader {
-          text: "SESSION"
+          text: "NOW PLAYING"
           foreground: root.foreground
           fontFamily: root.fontFamily
         }
 
         RowLayout {
           Layout.fillWidth: true
-          spacing: 0
+          spacing: Style.space(10)
 
-          Repeater {
-            model: root.powerActions
+          BorderSurface {
+            Layout.preferredWidth: Style.space(52)
+            Layout.preferredHeight: Style.space(52)
+            radius: Style.spacing.labelGap
+            color: Style.normalFillFor(root.foreground, Color.accent)
+            borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
 
-            Item {
-              id: powerCell
-              required property var modelData
-              Layout.fillWidth: true
-              implicitHeight: powerButton.implicitHeight
-
-              PanelActionButton {
-                id: powerButton
-                readonly property var modelData: powerCell.modelData
-                readonly property bool armed: root.confirming === modelData.id
-                anchors.centerIn: parent
-                iconText: modelData.icon
-                tooltipText: armed ? ("Click again to " + modelData.label.toLowerCase()) : modelData.label
-                foreground: armed ? root.urgent : root.foreground
-                hoverColor: modelData.confirm ? root.urgent : root.foreground
-                fontFamily: root.fontFamily
-                fontSize: Style.font.iconLarge
-                onClicked: root.triggerPower(modelData)
-              }
+            Image {
+              id: art
+              anchors.fill: parent
+              anchors.margins: Style.space(2)
+              fillMode: Image.PreserveAspectCrop
+              asynchronous: true
+              source: root.media ? root.media.artUrl : ""
+              visible: status === Image.Ready
             }
+
+            Text {
+              anchors.centerIn: parent
+              visible: !art.visible
+              text: "󰝚"
+              color: root.hasMedia ? root.foreground : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.iconLarge
+            }
+          }
+
+          ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 0
+            RowText {
+              text: root.hasMedia ? (root.media.title || root.media.identity) : "Nothing playing"
+              color: root.hasMedia ? root.foreground : root.dim
+              font.bold: root.hasMedia
+            }
+            RowText {
+              visible: text !== ""
+              text: root.hasMedia ? root.media.artist : ""
+              color: root.dim
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
+
+          PanelActionButton {
+            iconText: "󰒮"
+            tooltipText: "Previous"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            enabled: !!(root.player && root.player.canGoPrevious)
+            opacity: enabled ? 1 : 0.4
+            onClicked: root.mediaAction("previous")
+          }
+
+          PanelActionButton {
+            iconText: root.player && root.player.isPlaying ? "󰏤" : "󰐊"
+            tooltipText: root.player && root.player.isPlaying ? "Pause" : "Play"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.iconLarge
+            enabled: !!(root.player && (root.player.canTogglePlaying || root.player.canPlay || root.player.canPause))
+            opacity: enabled ? 1 : 0.4
+            onClicked: root.mediaAction("playPause")
+          }
+
+          PanelActionButton {
+            iconText: "󰒭"
+            tooltipText: "Next"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            enabled: !!(root.player && root.player.canGoNext)
+            opacity: enabled ? 1 : 0.4
+            onClicked: root.mediaAction("next")
+          }
+        }
+
+        Rectangle {
+          visible: root.showProgress
+          Layout.fillWidth: true
+          implicitHeight: Style.space(3)
+          radius: height / 2
+          color: Util.alpha(root.foreground, 0.15)
+
+          Rectangle {
+            height: parent.height
+            radius: parent.radius
+            color: Color.accent
+            width: root.showProgress ? parent.width * Math.max(0, Math.min(1, root.player.position / root.player.length)) : 0
+            Behavior on width { NumberAnimation { duration: 250 } }
           }
         }
 
