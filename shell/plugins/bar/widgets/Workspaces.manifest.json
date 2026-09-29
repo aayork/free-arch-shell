@@ -4,7 +4,7 @@
   "name": "Workspaces",
   "version": "1.0.0",
   "author": "Roseshell",
-  "description": "Workspace number indicators",
+  "description": "Workspace dots; the focused one expands into a pill",
   "kinds": [
     "bar-widget"
   ],
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "Workspaces",
-    "description": "Workspace number indicators",
+    "description": "Workspace dots; the focused one expands into a pill",
     "category": "Compositor",
     "allowMultiple": false
   }

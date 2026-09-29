@@ -36,6 +36,9 @@ BarWidget {
   }
 
   readonly property real trailingGap: root.vertical ? 0 : Style.spaceReal(1.5)
+  readonly property real dotSize: Math.round(Style.spaceReal(7))
+  readonly property real pillLength: Math.round(Style.spaceReal(22))
+  readonly property real dotGap: Math.round(Style.spaceReal(8))
 
   implicitWidth: grid.implicitWidth + trailingGap
   implicitHeight: grid.implicitHeight
@@ -45,40 +48,60 @@ BarWidget {
     anchors.fill: parent
     anchors.rightMargin: root.trailingGap
     columns: root.vertical ? 1 : root.workspaceIds().length
-    columnSpacing: root.vertical ? 0 : Style.space(1)
-    rowSpacing: root.vertical ? Style.space(2) : 0
+    columnSpacing: 0
+    rowSpacing: 0
 
     Repeater {
       model: root.workspaceIds()
 
       WidgetButton {
+        id: slot
         required property int modelData
 
         readonly property var workspace: root.workspaceById(modelData)
         readonly property bool occupied: workspace !== null && workspace.toplevels.values.length > 0
         readonly property bool focused: Hyprland.focusedWorkspace !== null && Hyprland.focusedWorkspace.id === modelData
+        // Pill-expand style: every workspace is a small dot and the focused
+        // one stretches into a pill along the bar's axis.
+        readonly property real pillLength: focused ? root.pillLength : root.dotSize
 
         bar: root.bar
-        text: focused ? "\uDB85\uDCFB" : (modelData === 10 ? "0" : String(modelData))
-        opacity: occupied || focused ? 1 : 0.5
-        // Active workspace gets the theme's primary accent; an occupied-but-
-        // unfocused one gets a dimmed version of that same accent as a
-        // "secondary" so it still reads as "has windows" without competing
-        // with the focused one. Color.muted isn't used here -- on this
-        // theme (Matte Black) it's #333 against a #121212 background,
-        // nearly invisible as text. An empty workspace is left at the
-        // widget's own default (unchanged).
-        // On a transparent bar the accent sits on the wallpaper and clashes,
-        // so everything follows the wallpaper-contrast barForeground instead;
-        // the focused glyph and the empty-workspace opacity still tell them apart.
+        labelVisible: false
+        hasVisualContent: true
+        tooltipText: modelData === 10 ? "Workspace 0" : "Workspace " + modelData
+        // Same colour rules as the old numbered style: accent for focused,
+        // dimmed accent for occupied, faint foreground for empty. On a
+        // transparent bar everything follows barForeground and opacity alone
+        // separates the states.
         foreground: (root.bar && root.bar.transparent)
           ? root.bar.barForeground
-          : (focused ? Color.accent : (occupied ? Util.alpha(Color.accent, 0.5) : (root.bar ? root.bar.barForeground : Color.foreground)))
-        horizontalMargin: 6
-        verticalPadding: 6
-        fixedWidth: root.vertical ? root.barSize : Style.space(20)
-        fixedHeight: root.barSize
+          : (focused ? Color.accent : (occupied ? Util.alpha(Color.accent, 0.8) : (root.bar ? root.bar.barForeground : Color.foreground)))
+        fixedWidth: root.vertical ? root.barSize : slot.pillLength + root.dotGap
+        fixedHeight: root.vertical ? slot.pillLength + root.dotGap : root.barSize
         onPressed: function() { root.focusWorkspace(modelData) }
+
+        Behavior on fixedWidth {
+          enabled: !root.vertical
+          NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+        }
+        Behavior on fixedHeight {
+          enabled: root.vertical
+          NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+        }
+
+        Rectangle {
+          anchors.centerIn: parent
+          width: root.vertical ? root.dotSize : slot.pillLength
+          height: root.vertical ? slot.pillLength : root.dotSize
+          radius: root.dotSize / 2
+          color: slot.foreground
+          opacity: slot.focused || slot.occupied ? 1 : 0.35
+
+          Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+          Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+          Behavior on color { ColorAnimation { duration: 160 } }
+          Behavior on opacity { NumberAnimation { duration: 160 } }
+        }
       }
     }
   }
