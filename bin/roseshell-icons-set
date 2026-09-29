@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# roseshell:summary=Choose the shell's icon set (Lucide or Nerd Font)
+# roseshell:args=<lucide|nerd>
+# roseshell:examples=roseshell icons set lucide | roseshell icons set nerd
+
+# The shell's QML draws Nerd Font glyphs. "lucide" layers Roseshell Icons
+# (default/fonts/roseshell-icons: Lucide artwork at those same codepoints) in
+# front of the monospace font, but only for the quickshell process: the rule
+# tests fontconfig's prgname, so terminals and apps launched from the shell
+# keep their Nerd Font icons. "nerd" removes the override.
+
+set -euo pipefail
+
+usage() {
+  echo "Usage: roseshell-icons-set <lucide|nerd>"
+}
+
+roseshell_path="${ROSESHELL_PATH:-$HOME/projects/roseshell}"
+fontconfig_file="$HOME/.config/fontconfig/fonts.conf"
+icons_conf="$HOME/.local/state/roseshell/fontconfig/icons.conf"
+include_line='  <include ignore_missing="yes">~/.local/state/roseshell/fontconfig/icons.conf</include>'
+
+# fonts.conf predating this override lacks the include; add it once.
+ensure_include() {
+  [[ -f $fontconfig_file ]] || return 0
+  grep -qF 'roseshell/fontconfig/icons.conf' "$fontconfig_file" && return 0
+  sed -i "s|^</fontconfig>|$include_line\n</fontconfig>|" "$fontconfig_file"
+}
+
+case "${1:-}" in
+  lucide)
+    ensure_include
+    mkdir -p "$(dirname "$icons_conf")"
+    cat >"$icons_conf" <<XML
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <dir>$roseshell_path/default/fonts/roseshell-icons</dir>
+  <match target="pattern">
+    <test name="prgname">
+      <string>quickshell</string>
+    </test>
+    <test name="family" qual="any">
+      <string>monospace</string>
+    </test>
+    <edit name="family" mode="prepend_first" binding="strong">
+      <string>Roseshell Icons</string>
+    </edit>
+  </match>
+</fontconfig>
+XML
+    ;;
+  nerd)
+    rm -f "$icons_conf"
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac
+
+fc-cache -f >/dev/null 2>&1 || true
+roseshell-restart-shell
