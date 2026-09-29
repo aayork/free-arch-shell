@@ -72,6 +72,7 @@ Item {
     fontCurrent.running = true
     cursorList.running = true
     cursorCurrent.running = true
+    cursorSizeCurrent.running = true
     iconList.running = true
     iconCurrent.running = true
     colorsFile.reload()
@@ -98,6 +99,7 @@ Item {
   property string fontValue: ""
   property var cursorOptions: []
   property string cursorValue: ""
+  property int cursorSize: 24
   property var iconOptions: []
   property string iconValue: ""
 
@@ -181,6 +183,51 @@ Item {
     id: cursorCurrent
     command: ["bash", "-c", "gsettings get org.gnome.desktop.interface cursor-theme"]
     stdout: SplitParser { onRead: function(line) { if (line) root.cursorValue = root.stripQuotes(line) } }
+  }
+
+  // The sizes worth offering for the current theme (see roseshell-cursor-set
+  // --sizes). After picking a new theme the size moves to the nearest of
+  // them, since the old one may fall between that theme's bitmaps.
+  property var cursorSizes: []
+  property bool snapCursorSize: false
+  // The command is set here rather than bound: a binding on cursorValue isn't
+  // guaranteed to have updated yet when this handler runs.
+  onCursorValueChanged: {
+    if (!cursorValue) return
+    cursorSizesProbe.running = false
+    cursorSizesProbe.command = ["bash", "-c", "roseshell-cursor-set --sizes " + Util.shellQuote(cursorValue)]
+    cursorSizesProbe.running = true
+  }
+
+  Process {
+    id: cursorSizesProbe
+    property var sizes: []
+    onStarted: sizes = []
+    stdout: SplitParser {
+      onRead: function(line) {
+        var n = parseInt(line, 10)
+        if (n > 0) cursorSizesProbe.sizes.push(n)
+      }
+    }
+    onExited: {
+      root.cursorSizes = cursorSizesProbe.sizes
+      if (root.snapCursorSize && root.cursorSizes.length > 1) {
+        var snapped = root.cursorSizes[root.cursorSizeIndex(root.cursorSize)]
+        if (snapped !== root.cursorSize) root.applyCursor(root.cursorValue, snapped)
+      }
+      root.snapCursorSize = false
+    }
+  }
+
+  Process {
+    id: cursorSizeCurrent
+    command: ["bash", "-c", "gsettings get org.gnome.desktop.interface cursor-size"]
+    stdout: SplitParser {
+      onRead: function(line) {
+        var n = parseInt(line, 10)
+        if (n > 0) root.cursorSize = n
+      }
+    }
   }
 
   Process {
@@ -368,12 +415,19 @@ Item {
     Util.execDetached("roseshell-font-set " + Util.shellQuote(name))
   }
 
-  function applyCursor(name) {
+  // roseshell-cursor-set writes theme and size together to every place
+  // Wayland, Xwayland and GTK clients read them from.
+  function applyCursor(name, size) {
     root.cursorValue = name
-    Util.execDetached(
-      "hyprctl setcursor " + Util.shellQuote(name) + " 20"
-      + " && gsettings set org.gnome.desktop.interface cursor-theme " + Util.shellQuote(name)
-    )
+    root.cursorSize = size
+    if (name) Util.execArgv(["roseshell-cursor-set", name, String(size)])
+  }
+
+  function cursorSizeIndex(size) {
+    var best = 0
+    for (var i = 1; i < root.cursorSizes.length; i++)
+      if (Math.abs(root.cursorSizes[i] - size) < Math.abs(root.cursorSizes[best] - size)) best = i
+    return best
   }
 
   function applyIcon(name) {
@@ -1327,6 +1381,7 @@ Item {
     property alias maximum: sliderControl.maximum
     property alias integer: sliderControl.integer
     property alias tickCount: sliderControl.tickCount
+    property alias step: sliderControl.step
     signal moved(real value)
     signal released(real value)
 
@@ -1729,8 +1784,8 @@ Item {
             Repeater {
               model: [
                 { label: "Font", icon: "󰛖", key: "font", placeholder: "Search fonts..." },
-                { label: "Cursor", icon: "󰇀", key: "cursor", placeholder: "Search cursor themes..." },
-                { label: "Icons", icon: "󰀻", key: "icon", placeholder: "Search icon themes..." }
+                { label: "Icons", icon: "󰀻", key: "icon", placeholder: "Search icon themes..." },
+                { label: "Cursor", icon: "󰇀", key: "cursor", placeholder: "Search cursor themes..." }
               ]
 
               delegate: Row {
@@ -1769,10 +1824,38 @@ Item {
                   placeholderText: modelData.placeholder
                   onChanged: function(v) {
                     if (modelData.key === "font") root.applyFont(v)
-                    else if (modelData.key === "cursor") root.applyCursor(v)
+                    else if (modelData.key === "cursor") {
+                      root.snapCursorSize = true
+                      root.applyCursor(v, root.cursorSize)
+                    }
                     else root.applyIcon(v)
                   }
                 }
+              }
+            }
+
+            // Sits under the Cursor row, which is last above for that reason.
+            // Steps through the theme's own sizes (cursorSizes) when known, so
+            // every notch is a visibly different cursor; plain px otherwise.
+            LabeledSlider {
+              id: cursorSizeSlider
+              readonly property bool stepped: root.cursorSizes.length > 1
+              property int pending: root.cursorSize
+              function sizeAt(v) { return stepped ? root.cursorSizes[Math.round(v)] : Math.round(v) }
+              label: "Cursor size"
+              valueText: pending + " px"
+              minLabel: "Small"
+              maxLabel: "Large"
+              minimum: stepped ? 0 : 16
+              maximum: stepped ? root.cursorSizes.length - 1 : 64
+              integer: true
+              step: 1
+              tickCount: stepped ? root.cursorSizes.length : 0
+              value: stepped ? root.cursorSizeIndex(root.cursorSize) : root.cursorSize
+              onMoved: function(v) { pending = sizeAt(v) }
+              onReleased: function(v) {
+                root.applyCursor(root.cursorValue, sizeAt(v))
+                pending = Qt.binding(function() { return root.cursorSize })
               }
             }
           }

@@ -54,8 +54,13 @@ QtObject {
     return "'" + String(value || "").replace(/'/g, "'\\''") + "'"
   }
 
+  // Sourced ahead of every launch: settings that change the session env after
+  // quickshell started (roseshell-cursor-set's XCURSOR_*) land here, so apps
+  // launched from the shell get the current values instead of quickshell's own.
+  readonly property string sessionEnv: '[ -r "$HOME/.local/state/roseshell/session.env" ] && . "$HOME/.local/state/roseshell/session.env"; '
+
   function execDetached(command) {
-    Quickshell.execDetached(["bash", "-lc", command])
+    Quickshell.execDetached(["bash", "-lc", sessionEnv + command])
   }
 
   // Run an argv vector without a shell interpreting it: the constant `exec "$@"`
@@ -64,7 +69,7 @@ QtObject {
   // The login shell (-l) keeps the PATH/session env GUI targets (tensaku, mpv,
   // xdg-open) need. Prefer this over execDetached for anything built from input.
   function execArgv(argv) {
-    Quickshell.execDetached(["bash", "-lc", 'exec "$@"', "bash"].concat(argv))
+    Quickshell.execDetached(["bash", "-lc", sessionEnv + 'exec "$@"', "bash"].concat(argv))
   }
 
   function isPlainObject(value) {

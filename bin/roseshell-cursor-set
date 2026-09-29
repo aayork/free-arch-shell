@@ -1,0 +1,193 @@
+#!/bin/bash
+
+# roseshell:summary=Set the cursor theme and size everywhere a client reads it
+# roseshell:args=<theme> <size> | --sizes <theme>
+# roseshell:examples=roseshell cursor-set Mocu-Black-Right 24
+
+# The Settings overlay's Cursor row and size slider call this. There is no
+# single cursor setting on a Hyprland desktop; each kind of client looks in a
+# different place, so this writes all of them:
+#
+#   - Hyprland's own cursor, plus every client that uses cursor-shape-v1
+#     (GTK4, Qt 6, Chromium, Firefox, quickshell): hyprctl setcursor.
+#   - GTK3 on Wayland, and the settings portal Flatpaks/Electron read: gsettings.
+#   - GTK apps without gsettings: gtk-3.0/gtk-4.0 settings.ini.
+#   - Xwayland GTK apps, live: xsettingsd's Gtk/CursorThemeSize (SIGHUP).
+#   - Other Xwayland apps (Qt xcb, Steam, Wine) go through libXcursor, which
+#     reads XCURSOR_SIZE first and the Xcursor.size resource only when that is
+#     unset, so both are written. Hyprland upscales Xwayland cursors by the
+#     monitor scale even with force_zero_scaling, so X apps take the same
+#     logical size as everything else, not size * scale. X windows with no
+#     cursor of their own show the root window's, which is reset here too.
+#   - XCURSOR_* for apps started from now on: Hyprland's env (keybinds),
+#     the systemd/D-Bus activation env, and session.env, which the shell
+#     sources before every launch (Util.execDetached). Apps already running
+#     keep the env they started with, so X apps that aren't GTK need a
+#     restart to pick up a new size.
+#
+# The values also go in cursor.lua, which hyprland.lua loads after its own
+# environment section, so they survive a reload and the next login.
+
+STATE_DIR="$HOME/.local/state/roseshell"
+LUA_FILE="$STATE_DIR/cursor.lua"
+ENV_FILE="$STATE_DIR/session.env"
+XSETTINGS_FILE="$HOME/.config/xsettingsd/xsettingsd.conf"
+XRESOURCES_FILE="$HOME/.Xresources"
+
+usage() {
+  echo "Usage: roseshell-cursor-set <theme> <size>" >&2
+  echo "       roseshell-cursor-set --sizes <theme>" >&2
+  exit 1
+}
+
+# --sizes prints the sizes worth offering for a theme, one per line. XCursor
+# themes ship a few fixed bitmaps (often 24/36/48/...), and every requested
+# size snaps to the nearest one, so most sizes look identical to their
+# neighbours and then jump. Each size printed here gives a different cursor
+# in at least one kind of client (see looks() below); where a step exists for
+# Hyprland's own cursor it is the bitmap / scale value, which it draws 1:1.
+if [[ $1 == --sizes ]]; then
+  (( $# == 2 )) || usage
+  scale=$(hyprctl monitors -j 2>/dev/null | jq -r '[.[].scale] | max // 1' 2>/dev/null)
+  THEME=$2 SCALE=${scale:-1} python3 - <<'EOF'
+import math, os, struct
+
+theme, scale = os.environ["THEME"], float(os.environ["SCALE"] or 1)
+home = os.path.expanduser("~")
+dirs = [home + "/.local/share/icons", home + "/.icons", "/usr/share/icons"]
+
+def bitmap_sizes(path):
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return set()
+    if data[:4] != b"Xcur":
+        return set()
+    count = struct.unpack_from("<I", data, 12)[0]
+    found = set()
+    for i in range(count):
+        kind, subtype, _ = struct.unpack_from("<III", data, 16 + 12 * i)
+        if kind == 0xFFFD0002:
+            found.add(subtype)
+    return found
+
+found = set()
+for d in dirs:
+    for name in ("left_ptr", "default", "arrow"):
+        found = bitmap_sizes(os.path.join(d, theme, "cursors", name))
+        if found:
+            break
+    if found:
+        break
+
+bitmaps = sorted(found)
+buffer_scale = math.ceil(scale)
+
+def nearest(target):
+    # Ties go to the smaller bitmap, as libXcursor's first-match does.
+    return min(bitmaps, key=lambda b: (abs(b - target), b))
+
+def looks(size):
+    # The bitmap each kind of client ends up with: Hyprland's own cursor
+    # (size * scale), clients that draw at an integer buffer scale and let
+    # Hyprland downscale (GTK3 and friends, size * ceil(scale)), and Xwayland.
+    return (nearest(size * scale), nearest(size * buffer_scale), nearest(size))
+
+# Candidates are the sizes that land exactly on a bitmap for Hyprland or for
+# the integer-scale clients. Sizes that look the same everywhere collapse into
+# one step, keeping the one Hyprland draws 1:1.
+crisp = {round(b / scale) for b in bitmaps}
+candidates = crisp | {round(b / buffer_scale) for b in bitmaps}
+steps = {}
+for size in sorted(s for s in candidates if 12 <= s <= 64):
+    key = looks(size)
+    if key not in steps or (size in crisp and steps[key] not in crisp):
+        steps[key] = size
+print("\n".join(str(s) for s in sorted(steps.values())))
+EOF
+  exit 0
+fi
+
+(( $# == 2 )) || usage
+theme=$1 size=$2
+# Theme names go into Lua strings and sed replacements below.
+[[ $theme =~ ^[A-Za-z0-9._+\ -]+$ ]] || usage
+[[ $size =~ ^[0-9]+$ ]] || usage
+(( size < 12 )) && size=12
+(( size > 96 )) && size=96
+
+# Replace a `key<sep>value` line in a file, or append it when missing.
+set_line() {
+  local file=$1 key=$2 sep=$3 value=$4
+  mkdir -p "${file%/*}"
+  touch "$file"
+  if grep -q "^${key}${sep}" "$file"; then
+    sed -i "s|^${key}${sep}.*|${key}${sep}${value}|" "$file"
+  else
+    printf '%s%s%s\n' "$key" "$sep" "$value" >>"$file"
+  fi
+}
+
+mkdir -p "$STATE_DIR"
+
+printf -- '-- Written by roseshell-cursor-set; loaded from hyprland.lua.\nhl.env("XCURSOR_THEME", "%s")\nhl.env("XCURSOR_SIZE", "%s")\nhl.env("HYPRCURSOR_SIZE", "%s")\n' \
+  "$theme" "$size" "$size" >"$LUA_FILE.new" && mv "$LUA_FILE.new" "$LUA_FILE"
+
+printf '# Written by roseshell-cursor-set; sourced before shell launches.\nexport XCURSOR_THEME=%q\nexport XCURSOR_SIZE=%s\nexport HYPRCURSOR_SIZE=%s\n' \
+  "$theme" "$size" "$size" >"$ENV_FILE.new" && mv "$ENV_FILE.new" "$ENV_FILE"
+
+hyprctl setcursor "$theme" "$size" >/dev/null
+hyprctl eval "hl.env(\"XCURSOR_THEME\", \"$theme\")
+hl.env(\"XCURSOR_SIZE\", \"$size\")
+hl.env(\"HYPRCURSOR_SIZE\", \"$size\")" >/dev/null
+
+systemctl --user set-environment XCURSOR_THEME="$theme" XCURSOR_SIZE="$size" HYPRCURSOR_SIZE="$size" 2>/dev/null
+dbus-update-activation-environment XCURSOR_THEME="$theme" XCURSOR_SIZE="$size" HYPRCURSOR_SIZE="$size" 2>/dev/null
+
+gsettings set org.gnome.desktop.interface cursor-theme "$theme"
+gsettings set org.gnome.desktop.interface cursor-size "$size"
+
+for gtk in gtk-3.0 gtk-4.0; do
+  ini="$HOME/.config/$gtk/settings.ini"
+  [[ -f $ini ]] || printf '[Settings]\n' >"$ini"
+  set_line "$ini" gtk-cursor-theme-name = "$theme"
+  set_line "$ini" gtk-cursor-theme-size = "$size"
+done
+
+set_line "$XSETTINGS_FILE" Gtk/CursorThemeName ' ' "\"$theme\""
+set_line "$XSETTINGS_FILE" Gtk/CursorThemeSize ' ' "$size"
+pkill -HUP -x xsettingsd 2>/dev/null
+
+set_line "$XRESOURCES_FILE" Xcursor.theme ': ' "$theme"
+set_line "$XRESOURCES_FILE" Xcursor.size ': ' "$size"
+command -v xrdb >/dev/null && xrdb -merge "$XRESOURCES_FILE" 2>/dev/null
+
+# Xwayland windows that never set a cursor of their own show the root
+# window's, which Hyprland loads once at the size it started with and never
+# resizes on setcursor. Redefine it (what `xsetroot -cursor_name left_ptr`
+# does, without needing xorg-xsetroot).
+if [[ -n $DISPLAY ]] && command -v python3 >/dev/null; then
+  XCURSOR_THEME=$theme XCURSOR_SIZE=$size python3 - <<'EOF' 2>/dev/null
+import ctypes
+x11 = ctypes.CDLL("libX11.so.6")
+xcursor = ctypes.CDLL("libXcursor.so.1")
+x11.XOpenDisplay.restype = ctypes.c_void_p
+x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+x11.XDefaultRootWindow.restype = ctypes.c_ulong
+x11.XDefineCursor.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong]
+x11.XFreeCursor.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+xcursor.XcursorLibraryLoadCursor.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+xcursor.XcursorLibraryLoadCursor.restype = ctypes.c_ulong
+display = x11.XOpenDisplay(None)
+if display:
+    cursor = xcursor.XcursorLibraryLoadCursor(display, b"left_ptr")
+    if cursor:
+        x11.XDefineCursor(display, x11.XDefaultRootWindow(display), cursor)
+        x11.XFreeCursor(display, cursor)
+    x11.XCloseDisplay(display)
+EOF
+fi
+
+exit 0
