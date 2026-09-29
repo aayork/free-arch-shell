@@ -41,10 +41,12 @@ if [[ -f ~/.config/kitty/kitty.conf ]] || roseshell-cmd-present kitty; then
   pkill -USR1 kitty
 fi
 
-if [[ -f ~/.config/ghostty/config ]]; then
-  sed -i "s/font-family = \".*\"/font-family = \"$font_name\"/g" ~/.config/ghostty/config
+# Ghostty 1.2+ prefers config.ghostty; older installs use config.
+for ghostty_config in ~/.config/ghostty/config.ghostty ~/.config/ghostty/config; do
+  [[ -f $ghostty_config ]] || continue
+  sed -i "s/font-family = \".*\"/font-family = \"$font_name\"/g" "$ghostty_config"
   pkill -SIGUSR2 ghostty
-fi
+done
 
 if [[ -f ~/.config/foot/foot.ini ]]; then
   sed -i "s/^font=.*/font=$font_name:size=9/g" ~/.config/foot/foot.ini

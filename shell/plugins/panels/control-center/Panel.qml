@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Shapes
 import Quickshell
 import Quickshell.Networking
 import qs.Commons
@@ -119,78 +118,20 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  // macOS-style icon: two stacked switches, the top one on (solid capsule,
-  // knob punched out on the right) and the bottom one off (outlined capsule,
-  // solid knob on the left). Vector shapes so it stays crisp at fractional
-  // scales; sized off the bar's icon font so its ink matches the neighboring
-  // glyphs (13x11 at the default 13px).
-  readonly property real iconUnit: Style.bar.iconFont
-  readonly property real switchWidth: iconUnit * 1.0
-  readonly property real switchHeight: iconUnit * 0.385
-  readonly property real switchGap: iconUnit * 0.12
-  readonly property real switchStroke: Math.max(1, iconUnit * 0.09)
-
-  component SwitchGlyph: Shape {
-    id: glyph
-    property bool on: false
-    property color color: "white"
-    readonly property real r: height / 2
-    // Knob: on = hole inset from the solid track; off = a solid dot the full
-    // height of the track, capping its left end.
-    readonly property real knobR: on ? r - root.switchStroke * 1.2 : r
-    readonly property real knobX: on ? width - r : r
-    // Strokes are centered on the path, so pull the outline in by half.
-    readonly property real inset: on ? 0 : root.switchStroke / 2
-
-    function capsule(i) {
-      var w = width, h = height, rr = r - i
-      return "M " + (i + rr) + " " + i
-        + " L " + (w - i - rr) + " " + i
-        + " A " + rr + " " + rr + " 0 0 1 " + (w - i - rr) + " " + (h - i)
-        + " L " + (i + rr) + " " + (h - i)
-        + " A " + rr + " " + rr + " 0 0 1 " + (i + rr) + " " + i + " Z"
-    }
-    function circle(cx, cy, cr) {
-      return "M " + (cx - cr) + " " + cy
-        + " A " + cr + " " + cr + " 0 1 0 " + (cx + cr) + " " + cy
-        + " A " + cr + " " + cr + " 0 1 0 " + (cx - cr) + " " + cy + " Z"
-    }
-
-    width: root.switchWidth
-    height: root.switchHeight
-    preferredRendererType: Shape.CurveRenderer
-
-    // Track: solid with the knob punched out when on, outlined when off.
-    ShapePath {
-      fillColor: glyph.on ? glyph.color : "transparent"
-      fillRule: ShapePath.OddEvenFill
-      strokeColor: glyph.on ? "transparent" : glyph.color
-      strokeWidth: glyph.on ? -1 : root.switchStroke
-      PathSvg {
-        path: glyph.capsule(glyph.inset)
-          + (glyph.on ? " " + glyph.circle(glyph.knobX, glyph.r, glyph.knobR) : "")
-      }
-    }
-
-    // Solid knob when off.
-    ShapePath {
-      fillColor: glyph.on ? "transparent" : glyph.color
-      strokeColor: "transparent"
-      strokeWidth: -1
-      PathSvg { path: glyph.on ? "" : glyph.circle(glyph.knobX, glyph.r, glyph.knobR) }
-    }
+  // macOS-style two-switch icon, kept as a font glyph (assets/build-glyph.py)
+  // so the text renderer pixel-snaps it like the Nerd Font icons beside it.
+  FontLoader {
+    id: glyphFont
+    source: Qt.resolvedUrl("assets/control-center.otf")
   }
 
-  WidgetButton {
+  BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    labelVisible: false
-    // Non-empty so the button counts as having visual content; the icon is
-    // drawn by the Column below.
-    text: " "
+    text: "\ue000"
+    fontFamily: glyphFont.name
     tooltipText: "Control Center"
-    fixedWidth: root.switchWidth + Style.spaceReal(8.5) * 2
 
     onPressed: function(b) {
       if (b === Qt.RightButton) { if (root.audio) root.audio.toggleOutputMute() }
@@ -204,14 +145,6 @@ Panel {
       if (wheel.steps === 0) return
       var volume = root.audio.setOutputVolume(root.audio.outputVolume + wheel.steps * 0.05)
       root.audio.showVolumeOsd(volume)
-    }
-
-    Column {
-      anchors.centerIn: parent
-      spacing: root.switchGap
-
-      SwitchGlyph { on: true; color: button.foreground }
-      SwitchGlyph { on: false; color: button.foreground }
     }
   }
 
