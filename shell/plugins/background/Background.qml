@@ -259,86 +259,158 @@ Item {
       WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
       exclusionMode: ExclusionMode.Ignore
 
-      BackgroundMedia {
-        id: base
-        anchors.fill: parent
-        path: root.displayedBackground
-        reloads: root.displayedReloads
-        playbackEnabled: !root.sessionObscured && !root.powerSaverActive && !panel.fullscreenHere
-        audioEnabled: panel.firstScreen
-        onReadyChanged: {
-          if (ready && root.finishingTransition) {
-            root.incomingBackground = ""
-            root.oldBackground = ""
-            root.finishingTransition = false
-          }
-        }
-      }
-
-      Image {
-        id: oldFrame
-        anchors.fill: parent
-        source: root.imageUrl(root.oldBackground)
-        fillMode: Image.PreserveAspectCrop
-        asynchronous: true
-        cache: false
-        smooth: true
-        mipmap: true
-        visible: root.oldBackground !== "" && root.revealProgress < 1
-        onStatusChanged: panel.maybeStartReveal()
-      }
-
+      // Everything that paints the wallpaper, grouped so the bar glass below
+      // can sample it as one texture.
       Item {
-        id: incomingLayer
+        id: wallpaper
         anchors.fill: parent
-        visible: root.incomingBackground !== "" && incomingFrame.status === Image.Ready && (root.revealProgress >= 1 || panel.maskReady)
-        layer.enabled: root.incomingBackground !== "" && root.revealProgress < 1
-        layer.smooth: true
-        layer.effect: MultiEffect {
-          maskEnabled: true
-          maskSource: revealMask
-          maskThresholdMin: 0.5
-          maskSpreadAtMin: 0.02
+
+        BackgroundMedia {
+          id: base
+          anchors.fill: parent
+          path: root.displayedBackground
+          reloads: root.displayedReloads
+          playbackEnabled: !root.sessionObscured && !root.powerSaverActive && !panel.fullscreenHere
+          audioEnabled: panel.firstScreen
+          onReadyChanged: {
+            if (ready && root.finishingTransition) {
+              root.incomingBackground = ""
+              root.oldBackground = ""
+              root.finishingTransition = false
+            }
+          }
         }
 
         Image {
-          id: incomingFrame
+          id: oldFrame
           anchors.fill: parent
-          source: root.imageUrl(root.incomingBackground)
+          source: root.imageUrl(root.oldBackground)
           fillMode: Image.PreserveAspectCrop
           asynchronous: true
           cache: false
           smooth: true
           mipmap: true
+          visible: root.oldBackground !== "" && root.revealProgress < 1
           onStatusChanged: panel.maybeStartReveal()
+        }
+
+        Item {
+          id: incomingLayer
+          anchors.fill: parent
+          visible: root.incomingBackground !== "" && incomingFrame.status === Image.Ready && (root.revealProgress >= 1 || panel.maskReady)
+          layer.enabled: root.incomingBackground !== "" && root.revealProgress < 1
+          layer.smooth: true
+          layer.effect: MultiEffect {
+            maskEnabled: true
+            maskSource: revealMask
+            maskThresholdMin: 0.5
+            maskSpreadAtMin: 0.02
+          }
+
+          Image {
+            id: incomingFrame
+            anchors.fill: parent
+            source: root.imageUrl(root.incomingBackground)
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            cache: false
+            smooth: true
+            mipmap: true
+            onStatusChanged: panel.maybeStartReveal()
+          }
+        }
+
+        Item {
+          id: revealMask
+          anchors.fill: parent
+          visible: false
+          layer.enabled: true
+
+          readonly property real slant: -0.18
+          readonly property real centerTop: width / 2 - slant * height / 2
+          readonly property real centerBottom: width / 2 + slant * height / 2
+          readonly property real reach: width / 2 + Math.abs(slant) * height / 2 + 4
+          readonly property real spread: reach * root.revealProgress
+
+          Shape {
+            anchors.fill: parent
+            antialiasing: true
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+              fillColor: "white"
+              strokeColor: "transparent"
+              startX: revealMask.centerTop - revealMask.spread; startY: 0
+              PathLine { x: revealMask.centerTop + revealMask.spread; y: 0 }
+              PathLine { x: revealMask.centerBottom + revealMask.spread; y: revealMask.height }
+              PathLine { x: revealMask.centerBottom - revealMask.spread; y: revealMask.height }
+              PathLine { x: revealMask.centerTop - revealMask.spread; y: 0 }
+            }
+          }
         }
       }
 
+      // Frosted glass behind a transparent bar. Hyprland's layer blur covers
+      // the bar surface edge to edge and stops in a hard line; drawing it here
+      // instead lets it fade out past the bar into the wallpaper. Windows sit
+      // above this layer, so they cover it as usual.
       Item {
-        id: revealMask
-        anchors.fill: parent
-        visible: false
-        layer.enabled: true
+        id: barGlass
 
-        readonly property real slant: -0.18
-        readonly property real centerTop: width / 2 - slant * height / 2
-        readonly property real centerBottom: width / 2 + slant * height / 2
-        readonly property real reach: width / 2 + Math.abs(slant) * height / 2 + 4
-        readonly property real spread: reach * root.revealProgress
+        readonly property var bar: root.shell && Util.isPlainObject(root.shell.barConfig) ? root.shell.barConfig : ({})
+        readonly property var glass: Util.isPlainObject(bar.glass) ? bar.glass : ({})
+        readonly property string edge: ["top", "bottom", "left", "right"].indexOf(bar.position) >= 0 ? bar.position : "top"
+        readonly property bool vertical: edge === "left" || edge === "right"
+        readonly property int barSize: vertical ? Style.bar.sizeVertical : Style.bar.sizeHorizontal
+        // How far past the bar the blur keeps fading.
+        readonly property int fade: 40
+        readonly property int depth: barSize + fade
+        // Strongest at the screen edge, weakening steadily from there.
+        readonly property real solidUntil: barSize * 0.2 / depth
+        readonly property real strength: Math.max(1, Number(glass.blurSize) || 8) * Math.max(1, Number(glass.blurPasses) || 2)
 
-        Shape {
+        visible: bar.transparent === true && glass.blur !== false
+        x: edge === "right" ? parent.width - depth : 0
+        y: edge === "bottom" ? parent.height - depth : 0
+        width: vertical ? depth : parent.width
+        height: vertical ? parent.height : depth
+
+        ShaderEffectSource {
+          id: glassSource
           anchors.fill: parent
-          antialiasing: true
-          preferredRendererType: Shape.CurveRenderer
-          ShapePath {
-            fillColor: "white"
-            strokeColor: "transparent"
-            startX: revealMask.centerTop - revealMask.spread; startY: 0
-            PathLine { x: revealMask.centerTop + revealMask.spread; y: 0 }
-            PathLine { x: revealMask.centerBottom + revealMask.spread; y: revealMask.height }
-            PathLine { x: revealMask.centerBottom - revealMask.spread; y: revealMask.height }
-            PathLine { x: revealMask.centerTop - revealMask.spread; y: 0 }
+          sourceItem: wallpaper
+          sourceRect: Qt.rect(barGlass.x, barGlass.y, barGlass.width, barGlass.height)
+          live: barGlass.visible
+          hideSource: false
+          visible: false
+        }
+
+        Rectangle {
+          id: glassMask
+          anchors.fill: parent
+          visible: false
+          layer.enabled: true
+          gradient: Gradient {
+            orientation: barGlass.vertical ? Gradient.Horizontal : Gradient.Vertical
+            readonly property bool reversed: barGlass.edge === "bottom" || barGlass.edge === "right"
+            GradientStop { position: 0; color: parent.reversed ? "transparent" : "white" }
+            GradientStop { position: parent.reversed ? 1 - barGlass.solidUntil : barGlass.solidUntil; color: "white" }
+            GradientStop { position: 1; color: parent.reversed ? "white" : "transparent" }
           }
+        }
+
+        MultiEffect {
+          anchors.fill: parent
+          source: glassSource
+          autoPaddingEnabled: false
+          blurEnabled: true
+          blurMax: 64
+          blur: Util.clamp(barGlass.strength / 30, 0.1, 1)
+          maskEnabled: true
+          maskSource: glassMask
+          // Centred so the smoothstep spans the gradient's full 0..1 range;
+          // at 0 anything above zero alpha is fully on and the edge is hard.
+          maskThresholdMin: 0.5
+          maskSpreadAtMin: 1
         }
       }
 
