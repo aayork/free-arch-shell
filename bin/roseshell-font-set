@@ -54,6 +54,8 @@ fi
 # and anything resolving "monospace" all read from here. This file is loaded
 # after the package-owned default, and prepend_first puts the chosen family at
 # the head of the list so it wins over the family that default prefers.
+# The trailing include is the shell-only icon font override written by
+# roseshell-icons-set; it stays inert while that file doesn't exist.
 fontconfig_file="$HOME/.config/fontconfig/fonts.conf"
 mkdir -p "$(dirname "$fontconfig_file")"
 cat >"$fontconfig_file" <<XML
@@ -68,6 +70,7 @@ cat >"$fontconfig_file" <<XML
       <string>$font_name</string>
     </edit>
   </match>
+  <include ignore_missing="yes">~/.local/state/roseshell/fontconfig/icons.conf</include>
 </fontconfig>
 XML
 

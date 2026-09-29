@@ -119,28 +119,24 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  // macOS-style icon: two stacked switches, the top one on (solid capsule,
-  // knob punched out on the right) and the bottom one off (outlined capsule,
-  // solid knob on the left). Vector shapes so it stays crisp at fractional
-  // scales; sized off the bar's icon font so its ink matches the neighboring
-  // glyphs (13x11 at the default 13px).
+  // macOS-style icon: two stacked switches, knobs on opposite ends. Drawn in
+  // Lucide's language (outlined track, stroke 1/12 of the icon size, ink
+  // about 20/24 of the em) so it sits with the icon font; vector shapes keep
+  // it crisp at fractional scales.
   readonly property real iconUnit: Style.bar.iconFont
-  readonly property real switchWidth: iconUnit * 1.0
-  readonly property real switchHeight: iconUnit * 0.385
-  readonly property real switchGap: iconUnit * 0.12
-  readonly property real switchStroke: Math.max(1, iconUnit * 0.09)
+  readonly property real switchWidth: iconUnit * 0.92
+  readonly property real switchHeight: iconUnit * 0.35
+  readonly property real switchGap: iconUnit * 0.13
+  readonly property real switchStroke: iconUnit / 12
 
   component SwitchGlyph: Shape {
     id: glyph
-    property bool on: false
+    property bool knobRight: false
     property color color: "white"
     readonly property real r: height / 2
-    // Knob: on = hole inset from the solid track; off = a solid dot the full
-    // height of the track, capping its left end.
-    readonly property real knobR: on ? r - root.switchStroke * 1.2 : r
-    readonly property real knobX: on ? width - r : r
     // Strokes are centered on the path, so pull the outline in by half.
-    readonly property real inset: on ? 0 : root.switchStroke / 2
+    readonly property real inset: root.switchStroke / 2
+    readonly property real knobX: knobRight ? width - r : r
 
     function capsule(i) {
       var w = width, h = height, rr = r - i
@@ -160,24 +156,19 @@ Panel {
     height: root.switchHeight
     preferredRendererType: Shape.CurveRenderer
 
-    // Track: solid with the knob punched out when on, outlined when off.
     ShapePath {
-      fillColor: glyph.on ? glyph.color : "transparent"
-      fillRule: ShapePath.OddEvenFill
-      strokeColor: glyph.on ? "transparent" : glyph.color
-      strokeWidth: glyph.on ? -1 : root.switchStroke
-      PathSvg {
-        path: glyph.capsule(glyph.inset)
-          + (glyph.on ? " " + glyph.circle(glyph.knobX, glyph.r, glyph.knobR) : "")
-      }
+      fillColor: "transparent"
+      strokeColor: glyph.color
+      strokeWidth: root.switchStroke
+      PathSvg { path: glyph.capsule(glyph.inset) }
     }
 
-    // Solid knob when off.
+    // Knob: a solid dot the full height of the track, capping one end.
     ShapePath {
-      fillColor: glyph.on ? "transparent" : glyph.color
+      fillColor: glyph.color
       strokeColor: "transparent"
       strokeWidth: -1
-      PathSvg { path: glyph.on ? "" : glyph.circle(glyph.knobX, glyph.r, glyph.knobR) }
+      PathSvg { path: glyph.circle(glyph.knobX, glyph.r, glyph.r) }
     }
   }
 
@@ -210,8 +201,8 @@ Panel {
       anchors.centerIn: parent
       spacing: root.switchGap
 
-      SwitchGlyph { on: true; color: button.foreground }
-      SwitchGlyph { on: false; color: button.foreground }
+      SwitchGlyph { knobRight: true; color: button.foreground }
+      SwitchGlyph { knobRight: false; color: button.foreground }
     }
   }
 
