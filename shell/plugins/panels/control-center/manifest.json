@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "roseshell.control-center",
+  "name": "Control Center",
+  "version": "1.0.0",
+  "author": "Roseshell",
+  "license": "MIT",
+  "description": "GNOME-style quick settings: grouped status icons, power actions, output/input volume, and shortcuts into the network, Bluetooth, and display panels.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Control Center",
+    "description": "Grouped network, Bluetooth, and volume icons that open quick settings.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

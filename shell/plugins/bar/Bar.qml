@@ -1896,7 +1896,7 @@ Item {
     }
     readonly property bool hovered: moduleHover.hovered
     readonly property bool dragSource: root.barDragSource === slot
-    readonly property bool panelOpen: root.activePopout === slot.activeItem
+    readonly property bool panelOpen: !!slot.activeItem && root.activePopout === slot.activeItem
     // Modules bigger than the mark they want (a text label in a padded slot,
     // a multi-line stack on a vertical bar) can say how long the open-panel
     // dot should be along the bar, so it tracks what the module paints
@@ -1907,8 +1907,14 @@ Item {
       if (hint !== undefined && hint !== null && hint > 0) return Math.round(hint)
       return Math.max(Style.space(10), Math.round((root.vertical ? slot.height : slot.width) * 0.55))
     }
-    implicitWidth: activeItem && activeItem.visible ? (root.vertical ? root.barSize : activeItem.implicitWidth) : 0
-    implicitHeight: activeItem && activeItem.visible ? activeItem.implicitHeight : 0
+    // `"hidden": true` on a layout entry keeps the widget loaded (so its panel
+    // can still be summoned, e.g. from the control center) but takes it off
+    // the bar. Its popup then anchors where the collapsed slot sits, so put
+    // hidden entries next to whatever opens them.
+    readonly property bool hiddenEntry: !!moduleSettings && moduleSettings.hidden === true
+    visible: !hiddenEntry
+    implicitWidth: !hiddenEntry && activeItem && activeItem.visible ? (root.vertical ? root.barSize : activeItem.implicitWidth) : 0
+    implicitHeight: !hiddenEntry && activeItem && activeItem.visible ? activeItem.implicitHeight : 0
     width: implicitWidth
     height: implicitHeight
     z: modulePointer.dragging ? 100 : 0
@@ -1973,7 +1979,7 @@ Item {
       readonly property int inset: Style.space(2)
 
       visible: opacity > 0
-      opacity: slot.panelOpen && !slot.dragSource ? 0.9 : 0
+      opacity: slot.panelOpen && !slot.hiddenEntry && !slot.dragSource ? 0.9 : 0
       color: Color.accent
       radius: Math.min(width, height) / 2
       width: root.vertical ? Style.space(2) : slot.panelIndicatorExtent
