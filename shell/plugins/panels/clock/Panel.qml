@@ -7,7 +7,8 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// The clock's popup: today's date/time plus a world clock. Timezones are
+// The clock's popup: today's date/time, local weather, recent notifications
+// (macOS-style notification center), and a world clock. Timezones are
 // user-managed here (add/remove/rename), persisted the same way the bar
 // label's own format is — through persistSettings -> updateEntryInline, no
 // separate config file.
@@ -56,6 +57,57 @@ Panel {
   property string activeForm: ""
   property string zoneQuery: ""
   property var filteredZoneNames: Model.filterZoneNames(root.allZoneNames, root.zoneQuery)
+
+  // Recent notifications come from the notifications service's feed (live
+  // toasts plus archived history); acting on one goes back through it.
+  readonly property var notificationService: bar && bar.shell && typeof bar.shell.firstPartyServiceFor === "function"
+    ? bar.shell.firstPartyServiceFor("roseshell.notifications") : null
+  readonly property var notifications: notificationService ? (notificationService.historyEntries || []) : []
+  // Repeats of one message (same app, summary and body) stack into a single
+  // row, newest first, so a chatty sender doesn't flood the list.
+  readonly property var notificationGroups: {
+    var groups = []
+    var byKey = {}
+    for (var i = 0; i < notifications.length; i++) {
+      var e = notifications[i]
+      var key = [e.app, e.summary, e.body].join("\u0001")
+      if (byKey[key] === undefined) {
+        byKey[key] = groups.length
+        groups.push({ entry: e, entries: [e] })
+      } else {
+        groups[byKey[key]].entries.push(e)
+      }
+    }
+    return groups
+  }
+  readonly property int collapsedNotificationCount: 3
+  property bool showAllNotifications: false
+  readonly property var visibleNotificationGroups: showAllNotifications
+    ? notificationGroups : notificationGroups.slice(0, collapsedNotificationCount)
+
+  function removeNotificationGroup(group) {
+    if (!root.notificationService) return
+    for (var i = 0; i < group.entries.length; i++) root.notificationService.removeHistoryEntry(group.entries[i])
+  }
+
+  function activateNotificationGroup(group) {
+    if (!root.notificationService) return
+    root.notificationService.activateHistoryEntry(group.entry)
+    for (var i = 1; i < group.entries.length; i++) root.notificationService.removeHistoryEntry(group.entries[i])
+    root.close()
+  }
+
+  function relativeTime(timestamp) {
+    var seconds = Math.max(0, Math.round((root.today.getTime() - Number(timestamp || 0)) / 1000))
+    if (seconds < 60) return "now"
+    var minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return minutes + "m ago"
+    var hours = Math.floor(minutes / 60)
+    if (hours < 24) return hours + "h ago"
+    var days = Math.floor(hours / 24)
+    if (days === 1) return "Yesterday"
+    return Qt.formatDate(new Date(Number(timestamp)), "MMM d")
+  }
 
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
@@ -243,8 +295,8 @@ Panel {
     open: root.opened
     centerOnBar: true
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(360))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(520))
+    contentWidth: panel.fittedContentWidth(Style.space(400))
+    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(760))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -352,6 +404,105 @@ Panel {
               spacing: Style.space(8)
               Button { text: "Save"; onClicked: root.commitHeroFormat(heroFormatField.text) }
               Button { text: "Cancel"; onClicked: root.cancelEditingHeroFormat() }
+            }
+          }
+
+          PanelSeparator { foreground: root.contentForeground }
+
+          WeatherSummary {
+            width: parent.width
+            active: root.opened
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+          }
+
+          PanelSeparator { foreground: root.contentForeground }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(8)
+
+            RowLayout {
+              width: parent.width
+
+              PanelSectionHeader {
+                Layout.fillWidth: true
+                text: "NOTIFICATIONS"
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+              }
+
+              Text {
+                id: clearAll
+                textFormat: Text.PlainText
+                visible: root.notifications.length > 0
+                text: "Clear all"
+                color: clearAllArea.containsMouse ? root.contentForeground : root.dim
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+
+                MouseArea {
+                  id: clearAllArea
+                  anchors.fill: parent
+                  anchors.margins: -Style.space(4)
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: if (root.notificationService) root.notificationService.clearAllNotifications()
+                }
+              }
+            }
+
+            Text {
+              visible: root.notifications.length === 0
+              width: parent.width
+              text: "No recent notifications."
+              color: root.dim
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.body
+              horizontalAlignment: Text.AlignHCenter
+            }
+
+            Column {
+              width: parent.width
+              spacing: Style.space(2)
+
+              Repeater {
+                model: root.visibleNotificationGroups
+
+                NotificationRow {
+                  required property var modelData
+                  width: parent.width
+                  entry: modelData.entry
+                  count: modelData.entries.length
+                  caption: [modelData.entry.app, root.relativeTime(modelData.entry.timestamp)].filter(function(p) { return p !== "" }).join(" · ")
+                  foreground: root.contentForeground
+                  dim: root.dim
+                  fontFamily: root.contentFontFamily
+                  onActivated: root.activateNotificationGroup(modelData)
+                  onDismissed: root.removeNotificationGroup(modelData)
+                }
+              }
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              visible: root.notificationGroups.length > root.collapsedNotificationCount
+              width: parent.width
+              text: root.showAllNotifications
+                ? "Show less"
+                : "Show " + (root.notificationGroups.length - root.collapsedNotificationCount) + " more"
+              color: moreArea.containsMouse ? root.contentForeground : root.dim
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+              horizontalAlignment: Text.AlignHCenter
+
+              MouseArea {
+                id: moreArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.showAllNotifications = !root.showAllNotifications
+              }
             }
           }
 

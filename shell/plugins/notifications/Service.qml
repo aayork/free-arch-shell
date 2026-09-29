@@ -481,7 +481,84 @@ Item {
         }
       }
       service.runNextPopupFileJob()
+      // Every file job can change what history holds (archive, silenced
+      // write, clear, removal), so the notification-center feed re-reads.
+      service.reloadHistoryEntries()
     }
+  }
+
+  // ---------------------------------------------------- notification center
+  //
+  // A read-only feed of recent notifications for panels (the clock popup):
+  // the toasts still on screen plus the archived history, newest first, in
+  // the historyRows shape. Re-read after each file job, since those are the
+  // only writers of historyDir.
+  property var historyEntries: []
+  property bool historyEntriesDirty: false
+
+  function reloadHistoryEntries() {
+    if (historyEntriesProc.running) {
+      historyEntriesDirty = true
+      return
+    }
+    historyEntriesDirty = false
+    historyEntriesProc.running = true
+  }
+
+  Process {
+    id: historyEntriesProc
+    running: false
+    command: ["bash", "-c", "awk 1 \"$1\"/*.json 2>/dev/null || true", "--", service.historyDir]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        service.historyEntries = NotificationLogic.historyRows(
+          text, service.liveRowsForReplay(), NotificationUrgency.Normal, service.historyLimit)
+      }
+    }
+    onExited: if (service.historyEntriesDirty) service.reloadHistoryEntries()
+  }
+
+  function liveIndexOf(entry) {
+    var name = NotificationLogic.popupFileName(entry)
+    for (var i = 0; i < popupModel.count; i++) {
+      var row = popupModel.get(i)
+      if (row && row.originalId >= 0 && NotificationLogic.popupFileName(row) === name) return i
+    }
+    return -1
+  }
+
+  // Forget one entry. A toast still on screen is dismissed first; its archive
+  // move is queued ahead of the delete, so the delete always finds the file.
+  function removeHistoryEntry(entry) {
+    if (!entry) return
+    var live = liveIndexOf(entry)
+    if (live >= 0) dismissPopup(live)
+    enqueuePopupFileJob(["bash", "-c",
+      "rm -f -- \"$1/$3\" \"$2/${3%.json}\"-*", "--",
+      historyDir, imagesDir, NotificationLogic.popupFileName(entry)])
+  }
+
+  // Clicking an entry does what clicking its toast would: a live toast runs
+  // its own default action; an archived one runs its persisted argv or
+  // focuses the sending app (its libnotify actions died with the sender).
+  // Either way it has been dealt with, so it leaves the list.
+  function activateHistoryEntry(entry) {
+    if (!entry) return
+    var live = liveIndexOf(entry)
+    if (live >= 0) {
+      invokePopupDefault(live)
+    } else {
+      var argv = NotificationLogic.parseExecArgv(entry.execArgv || "")
+      if (argv) Util.execArgv(argv)
+      else focusApp(entry)
+    }
+    removeHistoryEntry(entry)
+  }
+
+  function clearAllNotifications() {
+    clearPopups()
+    clearHistory()
   }
 
   // Consumes the remaining args as from/to pairs. Bounded read into a temp
@@ -849,6 +926,7 @@ Item {
       // Safe beside the restore read: it only re-persists entries whose
       // JSON exists, exactly the images the sweep keeps.
       service.sweepOrphanImages()
+      service.reloadHistoryEntries()
     })
   }
 
