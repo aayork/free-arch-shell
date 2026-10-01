@@ -19,6 +19,11 @@
 #     monitor scale even with force_zero_scaling, so X apps take the same
 #     logical size as everything else, not size * scale. X windows with no
 #     cursor of their own show the root window's, which is reset here too.
+#     That logical size still snaps to the theme's nearest bitmap, where
+#     Hyprland scales its own cursor to the exact size, so a size between
+#     bitmaps (18 with a 24px smallest bitmap) left X apps visibly bigger.
+#     A copy of the theme with a bitmap at exactly this size goes in
+#     ~/.local/share/icons, which shadows the installed one.
 #   - XCURSOR_* for apps started from now on: Hyprland's env (keybinds),
 #     the systemd/D-Bus activation env, and session.env, which the shell
 #     sources before every launch (Util.execDetached). Apps already running
@@ -74,6 +79,10 @@ def bitmap_sizes(path):
 
 found = set()
 for d in dirs:
+    # The copy this script generates (see the Xwayland bitmap step below)
+    # isn't the theme's own set of bitmaps.
+    if os.path.exists(os.path.join(d, theme, ".roseshell-xcursor")):
+        continue
     for name in ("left_ptr", "default", "arrow"):
         found = bitmap_sizes(os.path.join(d, theme, "cursors", name))
         if found:
@@ -83,6 +92,9 @@ for d in dirs:
 
 bitmaps = sorted(found)
 buffer_scale = math.ceil(scale)
+# Xwayland gets a bitmap generated at the exact size, unless the theme
+# already sits in the directory the generated copy would have to go in.
+exact_x = d != dirs[0]
 
 def nearest(target):
     # Ties go to the smaller bitmap, as libXcursor's first-match does.
@@ -92,7 +104,8 @@ def looks(size):
     # The bitmap each kind of client ends up with: Hyprland's own cursor
     # (size * scale), clients that draw at an integer buffer scale and let
     # Hyprland downscale (GTK3 and friends, size * ceil(scale)), and Xwayland.
-    return (nearest(size * scale), nearest(size * buffer_scale), nearest(size))
+    x = size if exact_x and size <= bitmaps[-1] else nearest(size)
+    return (nearest(size * scale), nearest(size * buffer_scale), x)
 
 # Candidates are the sizes that land exactly on a bitmap for Hyprland or for
 # the integer-scale clients. Sizes that look the same everywhere collapse into
@@ -154,6 +167,131 @@ for gtk in gtk-3.0 gtk-4.0; do
   set_line "$ini" gtk-cursor-theme-name = "$theme"
   set_line "$ini" gtk-cursor-theme-size = "$size"
 done
+
+# Xwayland clients draw the theme's nearest bitmap at its own size, so give
+# them one at exactly this size: a copy of the theme in ~/.local/share/icons
+# (first in every client's search path, Steam's runtime included) with each
+# cursor's largest bitmap scaled down to it. Wayland clients ask for
+# size * scale and keep landing on the bitmaps they did before. Done before
+# the X settings below, which make running GTK apps reload their cursors.
+if command -v python3 >/dev/null; then
+  THEME=$theme SIZE=$size python3 - <<'EOF' 2>/dev/null
+import os, shutil, struct
+
+theme, size = os.environ["THEME"], int(os.environ["SIZE"])
+home = os.path.expanduser("~")
+dirs = [home + "/.local/share/icons", home + "/.icons", "/usr/share/icons"]
+MARK = ".roseshell-xcursor"
+IMAGE = 0xFFFD0002
+copy = os.path.join(dirs[0], theme)
+
+def chunks(data):
+    # (type, subtype, raw bytes) per chunk; None for anything unexpected.
+    if data[:4] != b"Xcur":
+        return None
+    out = []
+    for i in range(struct.unpack_from("<I", data, 12)[0]):
+        kind, subtype, pos = struct.unpack_from("<III", data, 16 + 12 * i)
+        if kind != IMAGE:
+            return None
+        width, height = struct.unpack_from("<II", data, pos + 16)
+        out.append((kind, subtype, data[pos:pos + 36 + width * height * 4]))
+    return out
+
+def taps(src, dst):
+    # Per output pixel, the source pixels it covers and how much of each.
+    out = []
+    for i in range(dst):
+        lo, hi = i * src / dst, (i + 1) * src / dst
+        cover = [(j, min(hi, j + 1) - max(lo, j)) for j in range(int(lo), min(src, int(hi) + 1))]
+        total = sum(k for _, k in cover)
+        out.append([(j, k / total) for j, k in cover if k > 0])
+    return out
+
+def scaled(raw, nominal):
+    # Area-average one image chunk down to `size`. Pixels are premultiplied
+    # ARGB, so the channels average independently.
+    width, height, xhot, yhot, delay = struct.unpack_from("<5I", raw, 16)
+    nw = max(1, round(width * size / nominal))
+    nh = max(1, round(height * size / nominal))
+    pixels, tx, ty = raw[36:], taps(width, nw), taps(height, nh)
+    rows = []
+    for y in range(height):
+        row = pixels[y * width * 4:(y + 1) * width * 4]
+        rows.append([sum(row[j * 4 + c] * k for j, k in t) for t in tx for c in range(4)])
+    body = bytes(min(255, int(sum(rows[j][x] * k for j, k in t) + 0.5))
+                 for t in ty for x in range(nw * 4))
+    hot = (min(nw - 1, round(xhot * size / nominal)), min(nh - 1, round(yhot * size / nominal)))
+    return struct.pack("<9I", 36, IMAGE, size, 1, nw, nh, *hot, delay) + body
+
+def with_size(data):
+    parts = chunks(data)
+    if not parts or any(subtype == size for _, subtype, _ in parts):
+        return data
+    nominal = max(subtype for _, subtype, _ in parts)
+    parts += [(IMAGE, size, scaled(raw, nominal)) for _, subtype, raw in parts if subtype == nominal]
+    out = struct.pack("<4sIII", b"Xcur", 16, 0x10000, len(parts))
+    pos = 16 + 12 * len(parts)
+    for kind, subtype, raw in parts:
+        out += struct.pack("<III", kind, subtype, pos)
+        pos += len(raw)
+    return out + b"".join(raw for _, _, raw in parts)
+
+def marked(path):
+    try:
+        with open(os.path.join(path, MARK)) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+if marked(copy) == str(size):
+    raise SystemExit
+
+# Copies for an earlier theme or size.
+if os.path.isdir(dirs[0]):
+    for name in os.listdir(dirs[0]):
+        if marked(os.path.join(dirs[0], name)) is not None:
+            shutil.rmtree(os.path.join(dirs[0], name))
+
+source = next((os.path.join(d, theme) for d in dirs
+               if os.path.isdir(os.path.join(d, theme, "cursors"))), None)
+# A theme installed in ~/.local/share/icons itself can't be shadowed.
+if not source or source == copy:
+    raise SystemExit
+
+bitmaps = set()
+for name in ("left_ptr", "default", "arrow"):
+    try:
+        with open(os.path.join(source, "cursors", name), "rb") as f:
+            bitmaps = {subtype for _, subtype, _ in chunks(f.read()) or []}
+    except OSError:
+        continue
+    if bitmaps:
+        break
+# Nothing to add when the size is a bitmap, or there is no larger one to scale.
+if not bitmaps or size in bitmaps or size > max(bitmaps):
+    raise SystemExit
+
+tmp = copy + ".new"
+shutil.rmtree(tmp, ignore_errors=True)
+os.makedirs(os.path.join(tmp, "cursors"))
+for name in os.listdir(os.path.join(source, "cursors")):
+    src, dst = os.path.join(source, "cursors", name), os.path.join(tmp, "cursors", name)
+    if os.path.islink(src):
+        os.symlink(os.readlink(src), dst)
+    elif os.path.isfile(src):
+        with open(src, "rb") as f:
+            data = f.read()
+        with open(dst, "wb") as f:
+            f.write(with_size(data))
+for name in ("index.theme", "cursor.theme"):
+    if os.path.isfile(os.path.join(source, name)):
+        shutil.copy(os.path.join(source, name), tmp)
+with open(os.path.join(tmp, MARK), "w") as f:
+    f.write(str(size))
+os.rename(tmp, copy)
+EOF
+fi
 
 set_line "$XSETTINGS_FILE" Gtk/CursorThemeName ' ' "\"$theme\""
 set_line "$XSETTINGS_FILE" Gtk/CursorThemeSize ' ' "$size"
