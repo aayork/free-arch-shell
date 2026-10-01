@@ -38,8 +38,25 @@ function ownedByRoseshell(item, layout) {
     || (layoutHasWidget(layout, "roseshell.dropbox") && itemNamed(item, "dropbox"))
 }
 
+// True when an icon is a single-tone glyph (white, grey or black) rather than
+// full-colour artwork. `pixels` is RGBA bytes. A small coloured share still
+// counts, so a glyph keeps its tint when it grows an unread badge.
+function isMonochrome(pixels) {
+  var opaque = 0
+  var coloured = 0
+  for (var i = 0; i + 3 < pixels.length; i += 4) {
+    if (pixels[i + 3] < 64) continue
+    opaque++
+    var hi = Math.max(pixels[i], pixels[i + 1], pixels[i + 2])
+    var lo = Math.min(pixels[i], pixels[i + 1], pixels[i + 2])
+    if (hi - lo > 40) coloured++
+  }
+  return opaque > 0 && coloured <= opaque * 0.2
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
+    isMonochrome: isMonochrome,
     itemNamed: itemNamed,
     entryId: entryId,
     layoutHasWidget: layoutHasWidget,

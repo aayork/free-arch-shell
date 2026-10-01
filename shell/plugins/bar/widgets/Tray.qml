@@ -17,6 +17,7 @@ BarWidget {
   property var activeTrayItem: null
   property var activeTrayAnchor: null
   readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property color barForeground: bar ? bar.barForeground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property var pinnedIds: settings.pinned instanceof Array ? settings.pinned : []
   readonly property var hiddenIds: settings.hidden instanceof Array ? settings.hidden : []
@@ -764,13 +765,49 @@ BarWidget {
     }
   }
 
-  // Renders a tray icon, recoloring symbolic icons to the bar foreground so
-  // they stay visible on any theme (a raw symbolic icon keeps its baked-in
-  // fill and disappears against a matching background).
+  // Renders a tray icon, recoloring single-tone icons to the bar foreground so
+  // they stay visible on any theme and over any wallpaper (a raw symbolic icon
+  // keeps its baked-in fill and disappears against a matching background).
   component TrayIcon: Item {
     id: trayIconRoot
     required property var icon
-    readonly property bool symbolic: root.iconIsSymbolic(icon)
+    // Discord sends a bare white pixmap and Steam names its glyph
+    // "steam_tray_mono", so the "-symbolic" suffix alone misses them; the
+    // probe below catches single-tone icons by their pixels instead.
+    property bool monochrome: false
+    readonly property bool symbolic: root.iconIsSymbolic(icon) || monochrome
+
+    Canvas {
+      id: monochromeProbe
+      readonly property string url: root.trayIconSource(trayIconRoot.icon)
+      property string loadedUrl: ""
+      width: 16
+      height: 16
+      opacity: 0
+
+      function probe() {
+        if (loadedUrl && loadedUrl !== url) unloadImage(loadedUrl)
+        loadedUrl = url
+        if (!url) {
+          trayIconRoot.monochrome = false
+        } else if (isImageLoaded(url)) {
+          requestPaint()
+        } else {
+          loadImage(url)
+        }
+      }
+
+      onUrlChanged: probe()
+      Component.onCompleted: probe()
+      onImageLoaded: requestPaint()
+      onPaint: {
+        if (!url || !isImageLoaded(url)) return
+        var ctx = getContext("2d")
+        ctx.clearRect(0, 0, width, height)
+        ctx.drawImage(url, 0, 0, width, height)
+        trayIconRoot.monochrome = TrayModel.isMonochrome(ctx.getImageData(0, 0, width, height).data)
+      }
+    }
 
     Image {
       id: trayIconImage
@@ -791,7 +828,7 @@ BarWidget {
       source: trayIconImage
       visible: trayIconRoot.symbolic
       colorization: 1.0
-      colorizationColor: root.foreground
+      colorizationColor: root.barForeground
     }
   }
 
