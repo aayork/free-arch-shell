@@ -375,6 +375,7 @@ post_theme_commands=(
   roseshell-theme-set-t3code
   roseshell-theme-set-browser
   roseshell-theme-set-zen
+  roseshell-theme-set-thunderbird
   roseshell-theme-set-vscode
   roseshell-theme-set-obsidian
   roseshell-theme-set-keyboard

@@ -1,0 +1,63 @@
+#!/bin/bash
+
+# roseshell:summary=Apply the current Roseshell theme colors to Thunderbird
+# roseshell:hidden=true
+
+# The colours come from thunderbird.css, rendered into the current theme by
+# roseshell-theme-set-templates from ~/.config/roseshell/themed/thunderbird.css.tpl.
+# This copies it into every Thunderbird profile as chrome/roseshell.css and makes
+# sure userChrome.css and userContent.css import it, so anything the user keeps
+# in those two files of their own is left alone.
+#
+# Caveat: Thunderbird reads userChrome.css once, at startup. A theme change
+# lands on disk straight away but shows the next time Thunderbird is opened.
+
+theme_css="$HOME/.local/state/roseshell/current/theme/thunderbird.css"
+[[ -f $theme_css ]] || exit 0
+
+import_line='@import "roseshell.css";'
+
+# An @import only counts ahead of every other rule, so it goes first.
+ensure_import() {
+  local file="$1"
+
+  if [[ ! -f $file ]]; then
+    printf '%s\n' "$import_line" >"$file"
+  elif ! grep -qF "$import_line" "$file"; then
+    printf '%s\n%s\n' "$import_line" "$(<"$file")" >"$file.roseshell-tmp" && mv "$file.roseshell-tmp" "$file"
+  fi
+}
+
+apply_to_profile() {
+  local profile_dir="$1"
+  local user_js="$profile_dir/user.js"
+  local pref='user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);'
+
+  [[ -d $profile_dir ]] || return
+
+  mkdir -p "$profile_dir/chrome"
+  cp "$theme_css" "$profile_dir/chrome/roseshell.css"
+  ensure_import "$profile_dir/chrome/userChrome.css"
+  ensure_import "$profile_dir/chrome/userContent.css"
+
+  # userChrome.css is ignored unless this is on. user.js rather than prefs.js:
+  # Thunderbird rewrites prefs.js from memory while it runs, and reads user.js
+  # at every start without ever writing to it.
+  grep -qF "$pref" "$user_js" 2>/dev/null || printf '%s\n' "$pref" >>"$user_js"
+}
+
+# Thunderbird moved its profiles under XDG_CONFIG_HOME; older ones live in
+# ~/.thunderbird. Every profile is themed, not only the default: which one a
+# launch picks is decided per install, and a profile nobody opens costs a copy.
+for root in "${XDG_CONFIG_HOME:-$HOME/.config}/thunderbird" "$HOME/.thunderbird"; do
+  [[ -f $root/profiles.ini ]] || continue
+
+  while IFS= read -r path; do
+    [[ -n $path ]] || continue
+    if [[ $path == /* ]]; then
+      apply_to_profile "$path"
+    else
+      apply_to_profile "$root/$path"
+    fi
+  done < <(sed -n 's/^Path=//p' "$root/profiles.ini")
+done
