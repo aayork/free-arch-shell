@@ -18,7 +18,10 @@ BarWidget {
   }
 
   function workspaceIds() {
-    var ids = [1, 2, 3, 4, 5]
+    // Two are always there, the way GNOME starts out. Anything past that shows
+    // only while Hyprland has it, and Hyprland drops an empty workspace the
+    // moment it is left, so a third appears when entered and goes when vacated.
+    var ids = [1, 2]
     var values = Hyprland.workspaces.values
 
     for (var i = 0; i < values.length; i++) {
