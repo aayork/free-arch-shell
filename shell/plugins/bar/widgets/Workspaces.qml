@@ -42,6 +42,7 @@ BarWidget {
   readonly property real dotSize: Math.round(Style.spaceReal(7))
   readonly property real pillLength: Math.round(Style.spaceReal(22))
   readonly property real dotGap: Math.round(Style.spaceReal(8))
+  readonly property real roundness: 0.35
 
   implicitWidth: grid.implicitWidth + trailingGap
   implicitHeight: grid.implicitHeight
@@ -96,7 +97,7 @@ BarWidget {
           anchors.centerIn: parent
           width: root.vertical ? root.dotSize : slot.pillLength
           height: root.vertical ? slot.pillLength : root.dotSize
-          radius: root.dotSize / 2
+          radius: root.dotSize * root.roundness
           color: slot.foreground
           opacity: slot.focused || slot.occupied ? 1 : 0.35
 
